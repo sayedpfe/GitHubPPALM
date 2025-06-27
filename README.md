@@ -9,9 +9,12 @@ This solution uses GitHub Actions (or Azure DevOps) to automate the deployment o
 ## Prerequisites
 
 1. **Power Platform Environments**: Dev, Test (optional), and Production environments
+   - ✅ **Standard Environments**: Full support with all features
+   - ✅ **Managed Environments**: Full support with enhanced governance considerations
 2. **Service Principal**: For authentication in the CI/CD pipeline
 3. **GitHub Secrets** (or Azure DevOps Variables): For storing sensitive information
 4. **Power Platform CLI**: Installed in the build agent
+5. **Copilot Studio**: Enabled in your Power Platform environments
 
 ## Setup Instructions
 
@@ -125,3 +128,5 @@ Add these optional secrets for agent-specific configuration:
 - `ENABLE_WEBSITE_CHANNEL`: Set to "true" to generate website embed code
 
 📖 **For detailed agent deployment instructions, see [AGENT-DEPLOYMENT-GUIDE.md](./AGENT-DEPLOYMENT-GUIDE.md)**
+
+🆚 **Comparing with Power Platform Build Tools? See [PIPELINE-COMPARISON.md](./PIPELINE-COMPARISON.md)**
