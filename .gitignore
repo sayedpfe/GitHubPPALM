@@ -1,0 +1,54 @@
+# Git ignore file for Power Platform ALM
+
+# Build artifacts and outputs
+out/
+temp/
+*.zip
+
+# Solution checker outputs
+*.sarif
+*-analysis-result.json
+
+# Power Platform CLI cache
+.pac/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/settings.json
+.vscode/launch.json
+
+# PowerShell modules
+modules/
+
+# Logs
+*.log
+logs/
+
+# Environment-specific files
+.env
+.env.local
+
+# Azure DevOps
+.azure/
+
+# Node modules (if using npm for any tooling)
+node_modules/
+
+# Temporary files
+*.tmp
+*.temp
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# PowerShell execution policy warnings
+Set-ExecutionPolicy.*
+
+# Azure CLI cache
+.azure/

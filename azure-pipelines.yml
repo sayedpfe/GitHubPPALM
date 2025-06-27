@@ -1,0 +1,179 @@
+# Alternative Azure DevOps Pipeline for Power Platform Deployment
+# This pipeline uses PowerShell tasks with the Power Platform CLI
+# Note: You'll need to install the Microsoft Power Platform Build Tools extension
+# from the Azure DevOps Marketplace for full functionality
+
+trigger:
+  branches:
+    include:
+    - main
+  paths:
+    exclude:
+    - README.md
+    - docs/*
+
+pr:
+  branches:
+    include:
+    - main
+
+pool:
+  vmImage: 'windows-latest'  # Power Platform CLI works best on Windows
+
+variables:
+  SOLUTION_NAME: 'YourSolutionName'  # Replace with your actual solution name
+  SOLUTION_EXPORTED_FOLDER: '$(Pipeline.Workspace)/out/exported'
+  SOLUTION_FOLDER: '$(Pipeline.Workspace)/out/solutions'
+
+stages:
+- stage: Export
+  displayName: 'Export from Dev'
+  jobs:
+  - job: ExportSolution
+    displayName: 'Export Solution from Dev Environment'
+    steps:
+    - task: PowerShell@2
+      displayName: 'Install Power Platform CLI'
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Install Power Platform CLI
+          Invoke-WebRequest -Uri "https://aka.ms/PowerPlatformCLI" -OutFile "$(Agent.TempDirectory)/powerapps-cli-1.0.msi"
+          Start-Process msiexec.exe -ArgumentList "/i $(Agent.TempDirectory)/powerapps-cli-1.0.msi /quiet" -Wait
+          
+          # Add to PATH
+          $env:PATH += ";C:\Program Files\Microsoft Power Platform CLI"
+          Write-Host "##vso[task.setvariable variable=PATH]$env:PATH"
+
+    - task: PowerShell@2
+      displayName: 'Export Solution from Dev'
+      inputs:
+        targetType: 'filePath'
+        filePath: '$(System.DefaultWorkingDirectory)/scripts/export-solution.ps1'
+        arguments: >
+          -EnvironmentUrl "$(DEV_ENVIRONMENT_URL)"
+          -SolutionName "$(SOLUTION_NAME)"
+          -ClientId "$(POWER_PLATFORM_SP_APP_ID)"
+          -ClientSecret "$(POWER_PLATFORM_SP_CLIENT_SECRET)"
+          -TenantId "$(POWER_PLATFORM_TENANT_ID)"
+          -OutputPath "$(SOLUTION_EXPORTED_FOLDER)/"
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Exported Solution Artifact'
+      inputs:
+        targetPath: '$(SOLUTION_EXPORTED_FOLDER)'
+        artifactName: 'exported-solution'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Unpacked Solution Artifact'
+      inputs:
+        targetPath: '$(SOLUTION_FOLDER)'
+        artifactName: 'unpacked-solution'
+
+- stage: Build
+  displayName: 'Build Managed Solution'
+  dependsOn: Export
+  jobs:
+  - job: BuildSolution
+    displayName: 'Build Managed Solution'
+    steps:
+    - task: PowerPlatformToolInstaller@2
+      displayName: 'Install Power Platform Build Tools'
+
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download Unpacked Solution'
+      inputs:
+        artifactName: 'unpacked-solution'
+        targetPath: '$(SOLUTION_FOLDER)'
+
+    - task: PowerPlatformPackSolution@2
+      displayName: 'Pack Managed Solution'
+      inputs:
+        SolutionSourceFolder: '$(SOLUTION_FOLDER)/$(SOLUTION_NAME)'
+        SolutionOutputFile: '$(SOLUTION_FOLDER)/$(SOLUTION_NAME)_managed.zip'
+        SolutionType: 'Managed'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Managed Solution Artifact'
+      inputs:
+        targetPath: '$(SOLUTION_FOLDER)/$(SOLUTION_NAME)_managed.zip'
+        artifactName: 'managed-solution'
+
+- stage: Deploy
+  displayName: 'Deploy to Production'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: DeployToProduction
+    displayName: 'Deploy to Production Environment'
+    environment: 'Production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: PowerPlatformToolInstaller@2
+            displayName: 'Install Power Platform Build Tools'
+
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Managed Solution'
+            inputs:
+              artifactName: 'managed-solution'
+              targetPath: '$(Pipeline.Workspace)'
+
+          - task: PowerPlatformSetEnvironment@2
+            displayName: 'Set Power Platform Environment - Production'
+            inputs:
+              authenticationType: 'PowerPlatformSPN'
+              PowerPlatformSPN: '$(ProdServiceConnection)'
+
+          - task: PowerPlatformImportSolution@2
+            displayName: 'Import Solution to Production'
+            inputs:
+              authenticationType: 'PowerPlatformSPN'
+              PowerPlatformSPN: '$(ProdServiceConnection)'
+              SolutionInputFile: '$(Pipeline.Workspace)/$(SOLUTION_NAME)_managed.zip'
+              PublishChanges: true
+              OverwriteUnmanagedCustomizations: false
+              SkipProductUpdateDependencies: false
+              AsyncOperation: true
+              MaxAsyncWaitTime: '60'
+
+          - task: PowerShell@2
+            displayName: 'Post-Deployment Validation'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "✅ Solution deployed successfully to production!" -ForegroundColor Green
+                Write-Host "Deployment completed at: $(Get-Date)" -ForegroundColor Cyan
+
+- stage: SolutionChecker
+  displayName: 'Run Solution Checker'
+  dependsOn: Export
+  jobs:
+  - job: RunSolutionChecker
+    displayName: 'Run Solution Checker Analysis'
+    steps:
+    - task: PowerPlatformToolInstaller@2
+      displayName: 'Install Power Platform Build Tools'
+
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download Exported Solution'
+      inputs:
+        artifactName: 'exported-solution'
+        targetPath: '$(SOLUTION_EXPORTED_FOLDER)'
+
+    - task: PowerPlatformChecker@2
+      displayName: 'Run Solution Checker'
+      inputs:
+        authenticationType: 'PowerPlatformSPN'
+        PowerPlatformSPN: '$(DevServiceConnection)'
+        FilesToAnalyze: '$(SOLUTION_EXPORTED_FOLDER)/$(SOLUTION_NAME).zip'
+        RuleSet: '0ad12346-e108-40b8-a956-9a8f95ea18c9'  # Solution Checker ruleset ID
+
+    - task: PublishTestResults@2
+      displayName: 'Publish Solution Checker Results'
+      condition: succeededOrFailed()
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '**/*-checker-result.xml'
+        searchFolder: '$(Agent.BuildDirectory)'

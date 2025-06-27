@@ -1,0 +1,50 @@
+{
+  "environments": {
+    "development": {
+      "environmentUrl": "https://yourdev.crm.dynamics.com",
+      "environmentId": "your-dev-environment-id",
+      "displayName": "Development Environment",
+      "description": "Development environment for solution building and testing"
+    },
+    "test": {
+      "environmentUrl": "https://yourtest.crm.dynamics.com", 
+      "environmentId": "your-test-environment-id",
+      "displayName": "Test Environment",
+      "description": "Testing environment for validation before production"
+    },
+    "production": {
+      "environmentUrl": "https://yourprod.crm.dynamics.com",
+      "environmentId": "your-prod-environment-id", 
+      "displayName": "Production Environment",
+      "description": "Production environment for end users"
+    }
+  },
+  "solutionSettings": {
+    "publisherPrefix": "new",
+    "versionStrategy": "auto-increment",
+    "managedInProduction": true,
+    "unmanagedInDevelopment": true
+  },
+  "deploymentSettings": {
+    "skipDependencyCheck": false,
+    "publishWorkflows": true,
+    "overwriteUnmanagedCustomizations": false,
+    "importAsHolding": false,
+    "activateFlows": true
+  },
+  "agentSettings": {
+    "autoPublishAfterDeployment": true,
+    "autoEnableAfterDeployment": true,
+    "shareWithGroups": [
+      "All Company"
+    ],
+    "agentNames": [
+      "YourAgentName"
+    ],
+    "enableAnalytics": true,
+    "configureChannels": [
+      "Teams",
+      "Website"
+    ]
+  }
+}

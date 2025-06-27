@@ -1,0 +1,206 @@
+name: Power Platform Solution Deployment
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment for deployment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - test
+
+env:
+  SOLUTION_NAME: 'YourSolutionName'  # Replace with your actual solution name
+  SOLUTION_EXPORTED_FOLDER: 'out/exported/'
+  SOLUTION_FOLDER: 'out/solutions/'
+  SOLUTION_TARGET_FOLDER: 'solutions/'
+
+jobs:
+  export-from-dev:
+    runs-on: ubuntu-latest
+    env:
+      RUNNER_DEBUG: 1
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Setup Power Platform CLI
+      uses: microsoft/powerplatform-actions/actions-install@v1
+
+    - name: Authenticate to Dev Environment
+      uses: microsoft/powerplatform-actions/auth@v1
+      with:
+        environment-url: ${{ secrets.DEV_ENVIRONMENT_URL }}
+        app-id: ${{ secrets.POWER_PLATFORM_SP_APP_ID }}
+        client-secret: ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}
+        tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+
+    - name: Export solution
+      uses: microsoft/powerplatform-actions/export-solution@v1
+      with:
+        environment-url: ${{ secrets.DEV_ENVIRONMENT_URL }}
+        solution-name: ${{ env.SOLUTION_NAME }}
+        solution-output-file: ${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}.zip
+        managed: false
+
+    - name: Unpack solution
+      uses: microsoft/powerplatform-actions/unpack-solution@v1
+      with:
+        solution-file: ${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}.zip
+        solution-folder: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}
+        solution-type: 'Unmanaged'
+        overwrite-files: true
+
+    - name: Upload exported solution as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: exportedsolution
+        path: ${{ env.SOLUTION_EXPORTED_FOLDER }}
+
+    - name: Upload unpacked solution as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: unpackedsolution
+        path: ${{ env.SOLUTION_FOLDER }}
+
+  build-managed-solution:
+    needs: [ export-from-dev ]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Download exported solution artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: unpackedsolution
+        path: ${{ env.SOLUTION_FOLDER }}
+
+    - name: Setup Power Platform CLI
+      uses: microsoft/powerplatform-actions/actions-install@v1
+
+    - name: Pack managed solution
+      uses: microsoft/powerplatform-actions/pack-solution@v1
+      with:
+        solution-folder: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}
+        solution-file: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+        solution-type: 'Managed'
+
+    - name: Upload managed solution as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: managedsolution
+        path: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+
+  deploy-to-production:
+    needs: [ build-managed-solution ]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    environment: production
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: true
+
+    - name: Download managed solution artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: managedsolution
+        path: ${{ env.SOLUTION_FOLDER }}
+
+    - name: Setup Power Platform CLI
+      uses: microsoft/powerplatform-actions/actions-install@v1
+
+    - name: Authenticate to Production Environment
+      uses: microsoft/powerplatform-actions/auth@v1
+      with:
+        environment-url: ${{ secrets.PROD_ENVIRONMENT_URL }}
+        app-id: ${{ secrets.POWER_PLATFORM_SP_APP_ID }}
+        client-secret: ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}
+        tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+
+    - name: Import solution to Production
+      uses: microsoft/powerplatform-actions/import-solution@v1
+      with:
+        environment-url: ${{ secrets.PROD_ENVIRONMENT_URL }}
+        solution-file: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+        force-overwrite: true
+        publish-changes: true
+        skip-dependency-check: false
+
+    - name: Post-Deployment Agent Configuration
+      if: success()
+      shell: pwsh
+      run: |
+        ${{ github.workspace }}/scripts/post-deploy-agent.ps1 `
+          -EnvironmentUrl "${{ secrets.PROD_ENVIRONMENT_URL }}" `
+          -ClientId "${{ secrets.POWER_PLATFORM_SP_APP_ID }}" `
+          -ClientSecret "${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}" `
+          -TenantId "${{ secrets.POWER_PLATFORM_TENANT_ID }}" `
+          -PublishAgent $true `
+          -EnableAgent $true
+
+    - name: Configure Agent Channels
+      if: success() && (vars.ENABLE_TEAMS_CHANNEL == 'true' || vars.ENABLE_WEBSITE_CHANNEL == 'true')
+      shell: pwsh
+      run: |
+        $channels = @()
+        if ("${{ vars.ENABLE_TEAMS_CHANNEL }}" -eq "true") { $channels += "Teams" }
+        if ("${{ vars.ENABLE_WEBSITE_CHANNEL }}" -eq "true") { $channels += "Website" }
+        
+        ${{ github.workspace }}/scripts/configure-agent-channels.ps1 `
+          -EnvironmentUrl "${{ secrets.PROD_ENVIRONMENT_URL }}" `
+          -ClientId "${{ secrets.POWER_PLATFORM_SP_APP_ID }}" `
+          -ClientSecret "${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}" `
+          -TenantId "${{ secrets.POWER_PLATFORM_TENANT_ID }}" `
+          -EnableChannels $channels `
+          -ShareWithGroup "${{ vars.SHARE_WITH_GROUP || 'All Company' }}"
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ Solution and Agent deployed successfully to production!"
+          echo "🤖 Agent is now published and ready for use!"
+        else
+          echo "❌ Solution deployment failed!"
+          exit 1
+        fi
+
+  run-solution-checker:
+    needs: [ export-from-dev ]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download exported solution artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: exportedsolution
+        path: ${{ env.SOLUTION_EXPORTED_FOLDER }}
+
+    - name: Setup Power Platform CLI
+      uses: microsoft/powerplatform-actions/actions-install@v1
+
+    - name: Run Solution Checker
+      uses: microsoft/powerplatform-actions/check-solution@v1
+      with:
+        environment-url: ${{ secrets.DEV_ENVIRONMENT_URL }}
+        app-id: ${{ secrets.POWER_PLATFORM_SP_APP_ID }}
+        client-secret: ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}
+        tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+        path: ${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}.zip
+        checker-logs-artifact-name: 'solution-checker-logs'
