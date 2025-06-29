@@ -45,11 +45,56 @@ try {
     
     # Connect to Power Platform
     Write-Host "Authenticating to Power Platform..." -ForegroundColor Cyan
-    $securePassword = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-    $credential = New-Object System.Management.Automation.PSCredential($ClientId, $securePassword)
     
-    # Add Power Apps connection
-    Add-PowerAppsAccount -TenantID $TenantId -ApplicationId $ClientId -ClientSecret $ClientSecret -Endpoint prod
+    # Try multiple authentication approaches
+    $authSuccess = $false
+    
+    # Method 1: Add-PowerAppsAccount with service principal
+    try {
+        Write-Host "Attempting authentication with service principal..." -ForegroundColor Gray
+        Add-PowerAppsAccount -TenantID $TenantId -ApplicationId $ClientId -ClientSecret $ClientSecret -Endpoint prod
+        
+        # Test if authentication worked
+        $testAccount = Get-PowerAppsAccount -ErrorAction SilentlyContinue
+        if ($testAccount) {
+            Write-Host "✅ Service principal authentication successful" -ForegroundColor Green
+            $authSuccess = $true
+        }
+    }
+    catch {
+        Write-Warning "Service principal authentication failed: $($_.Exception.Message)"
+    }
+    
+    # Method 2: Direct REST API authentication if PowerShell modules fail
+    if (!$authSuccess) {
+        Write-Host "Attempting direct REST API authentication..." -ForegroundColor Gray
+        try {
+            # Get OAuth token directly
+            $tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+            $tokenBody = @{
+                client_id = $ClientId
+                client_secret = $ClientSecret
+                scope = "https://service.powerapps.com/.default"
+                grant_type = "client_credentials"
+            }
+            
+            $tokenResponse = Invoke-RestMethod -Uri $tokenUrl -Method Post -Body $tokenBody -ContentType "application/x-www-form-urlencoded"
+            
+            if ($tokenResponse.access_token) {
+                Write-Host "✅ Direct REST API authentication successful" -ForegroundColor Green
+                $authSuccess = $true
+                $directApiToken = $tokenResponse.access_token
+            }
+        }
+        catch {
+            Write-Warning "Direct REST API authentication also failed: $($_.Exception.Message)"
+        }
+    }
+    
+    if (!$authSuccess) {
+        Write-Error "❌ All authentication methods failed. Please verify service principal credentials and permissions."
+        exit 1
+    }
     
     # Get environment details
     Write-Host "Getting environment details..." -ForegroundColor Cyan
@@ -64,19 +109,19 @@ try {
     $environmentIdentifier = ""
     try {
         $uri = [System.Uri]$EnvironmentUrl
-        $host = $uri.Host
-        Write-Host "Parsed host: $host" -ForegroundColor Gray
+        $hostName = $uri.Host
+        Write-Host "Parsed hostname: $hostName" -ForegroundColor Gray
         
         # Extract org name from different URL patterns
-        if ($host -match '^([^.]+)\.crm[0-9]*\.dynamics\.com$') {
+        if ($hostName -match '^([^.]+)\.crm[0-9]*\.dynamics\.com$') {
             $environmentIdentifier = $matches[1]
-        } elseif ($host -match '^([^.]+)\.api\.crm[0-9]*\.dynamics\.com$') {
+        } elseif ($hostName -match '^([^.]+)\.api\.crm[0-9]*\.dynamics\.com$') {
             $environmentIdentifier = $matches[1]
-        } elseif ($host -match '^([^.]+)\..*\.dynamics\.com$') {
+        } elseif ($hostName -match '^([^.]+)\..*\.dynamics\.com$') {
             $environmentIdentifier = $matches[1]
         } else {
-            # Fallback: try to extract from path or use the whole host
-            $environmentIdentifier = $host.Split('.')[0]
+            # Fallback: try to extract from path or use the whole hostname
+            $environmentIdentifier = $hostName.Split('.')[0]
         }
         
         Write-Host "Extracted environment identifier: $environmentIdentifier" -ForegroundColor Gray
@@ -90,56 +135,168 @@ try {
     
     # Get all environments and find the matching one
     Write-Host "Retrieving all available environments..." -ForegroundColor Cyan
-    $allEnvironments = Get-AdminPowerAppEnvironment
     
-    Write-Host "Found $($allEnvironments.Count) total environments" -ForegroundColor Gray
+    $allEnvironments = @()
+    $environmentDiscoverySuccess = $false
     
-    # Debug: Show first few environment names for troubleshooting
-    if ($allEnvironments.Count -gt 0) {
-        Write-Host "Sample environments (first 3):" -ForegroundColor Gray
-        $allEnvironments | Select-Object -First 3 | ForEach-Object {
-            Write-Host "  - $($_.DisplayName) | $($_.EnvironmentName)" -ForegroundColor Gray
+    # Method 1: Try PowerShell cmdlets first
+    try {
+        Write-Host "Trying PowerShell cmdlets for environment discovery..." -ForegroundColor Gray
+        $allEnvironments = Get-AdminPowerAppEnvironment -ErrorAction Stop
+        
+        if ($allEnvironments.Count -gt 0) {
+            Write-Host "✅ Found $($allEnvironments.Count) environments using PowerShell cmdlets" -ForegroundColor Green
+            $environmentDiscoverySuccess = $true
         }
     }
-    
-    # Try multiple matching strategies
-    $environment = $null
-    
-    # Strategy 1: Exact match on environment identifier
-    $environment = $allEnvironments | Where-Object { 
-        $_.EnvironmentName -eq $environmentIdentifier -or 
-        $_.DisplayName -eq $environmentIdentifier 
-    } | Select-Object -First 1
-    
-    if (!$environment) {
-        # Strategy 2: Partial match on environment name
-        $environment = $allEnvironments | Where-Object { 
-            $_.EnvironmentName -like "*$environmentIdentifier*" -or 
-            $_.DisplayName -like "*$environmentIdentifier*" 
-        } | Select-Object -First 1
+    catch {
+        Write-Warning "PowerShell cmdlet environment discovery failed: $($_.Exception.Message)"
     }
     
-    if (!$environment) {
-        # Strategy 3: Match against the full URL in environment properties
-        $environment = $allEnvironments | Where-Object { 
-            $_.Internal.properties.linkedEnvironmentMetadata.instanceUrl -eq $EnvironmentUrl -or
-            $_.Internal.properties.instanceUrl -eq $EnvironmentUrl
-        } | Select-Object -First 1
-    }
-    
-    if (!$environment) {
-        Write-Host "❌ Environment matching failed. Available environments:" -ForegroundColor Red
-        $allEnvironments | ForEach-Object {
-            Write-Host "  - Name: $($_.DisplayName)" -ForegroundColor Yellow
-            Write-Host "    ID: $($_.EnvironmentName)" -ForegroundColor Yellow
-            if ($_.Internal.properties.instanceUrl) {
-                Write-Host "    URL: $($_.Internal.properties.instanceUrl)" -ForegroundColor Yellow
+    # Method 2: Direct REST API call if PowerShell cmdlets fail
+    if (!$environmentDiscoverySuccess) {
+        Write-Host "Trying direct REST API for environment discovery..." -ForegroundColor Gray
+        try {
+            # Use the token from either authentication method
+            $apiToken = $null
+            if ($directApiToken) {
+                $apiToken = $directApiToken
+            } else {
+                $powerAppsAccount = Get-PowerAppsAccount -ErrorAction SilentlyContinue
+                if ($powerAppsAccount -and $powerAppsAccount.AccessToken) {
+                    $apiToken = $powerAppsAccount.AccessToken
+                }
             }
-            Write-Host "" -ForegroundColor Yellow
+            
+            if ($apiToken) {
+                $envHeaders = @{
+                    'Authorization' = "Bearer $apiToken"
+                    'Content-Type' = 'application/json'
+                }
+                
+                # Try multiple environment API endpoints
+                $envEndpoints = @(
+                    "https://api.powerapps.com/providers/Microsoft.PowerApps/environments",
+                    "https://api.powerplatform.com/environments"
+                )
+                
+                foreach ($envEndpoint in $envEndpoints) {
+                    try {
+                        Write-Host "   Trying endpoint: $envEndpoint" -ForegroundColor Gray
+                        $envResponse = Invoke-RestMethod -Uri $envEndpoint -Headers $envHeaders -Method Get -ErrorAction Stop
+                        
+                        if ($envResponse.value) {
+                            $allEnvironments = $envResponse.value
+                            Write-Host "✅ Found $($allEnvironments.Count) environments using REST API" -ForegroundColor Green
+                            $environmentDiscoverySuccess = $true
+                            break
+                        }
+                    }
+                    catch {
+                        Write-Host "   ❌ Failed with endpoint: $envEndpoint" -ForegroundColor Gray
+                        Write-Host "   Error: $($_.Exception.Message)" -ForegroundColor Gray
+                    }
+                }
+            }
         }
-        Write-Error "Environment not found for URL: $EnvironmentUrl"
-        Write-Error "Please verify the environment URL matches one of the available environments above."
+        catch {
+            Write-Warning "REST API environment discovery failed: $($_.Exception.Message)"
+        }
+    }
+    
+    # Method 3: Extract environment ID directly from URL if both methods fail
+    if (!$environmentDiscoverySuccess -or $allEnvironments.Count -eq 0) {
+        Write-Warning "⚠️ Could not retrieve environment list. Attempting direct environment access..."
+        
+        # Extract environment ID from URL for direct access
+        $directEnvironmentId = $null
+        try {
+            # For URLs like https://org12345678.crm.dynamics.com, the org name is the environment ID
+            $uri = [System.Uri]$EnvironmentUrl
+            $hostName = $uri.Host
+            
+            if ($hostName -match '^([^.]+)\.crm[0-9]*\.dynamics\.com$') {
+                $directEnvironmentId = $matches[1]
+            }
+            
+            if ($directEnvironmentId) {
+                Write-Host "✅ Extracted environment ID from URL: $directEnvironmentId" -ForegroundColor Green
+                
+                # Create a minimal environment object for processing
+                $environment = [PSCustomObject]@{
+                    EnvironmentName = $directEnvironmentId
+                    DisplayName = $directEnvironmentId
+                    Internal = [PSCustomObject]@{
+                        properties = [PSCustomObject]@{
+                            instanceUrl = $EnvironmentUrl
+                        }
+                    }
+                }
+                
+                Write-Host "✅ Using direct environment access method" -ForegroundColor Green
+                $environmentDiscoverySuccess = $true
+            }
+        }
+        catch {
+            Write-Error "Failed to extract environment ID from URL: $($_.Exception.Message)"
+        }
+    }
+    
+    if (!$environmentDiscoverySuccess) {
+        Write-Error "❌ All environment discovery methods failed. Please verify:"
+        Write-Host "  1. Service principal has Power Platform Administrator or Environment Admin permissions" -ForegroundColor Yellow
+        Write-Host "  2. Environment URL is correct and accessible" -ForegroundColor Yellow
+        Write-Host "  3. Service principal has been granted consent in Azure AD" -ForegroundColor Yellow
         exit 1
+    }
+    
+    # Find the matching environment (skip if we already have it from direct access method)
+    if (!$environment) {
+        # Debug: Show first few environment names for troubleshooting
+        if ($allEnvironments.Count -gt 0) {
+            Write-Host "Sample environments (first 3):" -ForegroundColor Gray
+            $allEnvironments | Select-Object -First 3 | ForEach-Object {
+                Write-Host "  - $($_.DisplayName) | $($_.EnvironmentName)" -ForegroundColor Gray
+            }
+        }
+        
+        # Try multiple matching strategies
+        # Strategy 1: Exact match on environment identifier
+        $environment = $allEnvironments | Where-Object { 
+            $_.EnvironmentName -eq $environmentIdentifier -or 
+            $_.DisplayName -eq $environmentIdentifier 
+        } | Select-Object -First 1
+        
+        if (!$environment) {
+            # Strategy 2: Partial match on environment name
+            $environment = $allEnvironments | Where-Object { 
+                $_.EnvironmentName -like "*$environmentIdentifier*" -or 
+                $_.DisplayName -like "*$environmentIdentifier*" 
+            } | Select-Object -First 1
+        }
+        
+        if (!$environment) {
+            # Strategy 3: Match against the full URL in environment properties
+            $environment = $allEnvironments | Where-Object { 
+                $_.Internal.properties.linkedEnvironmentMetadata.instanceUrl -eq $EnvironmentUrl -or
+                $_.Internal.properties.instanceUrl -eq $EnvironmentUrl
+            } | Select-Object -First 1
+        }
+        
+        if (!$environment) {
+            Write-Host "❌ Environment matching failed. Available environments:" -ForegroundColor Red
+            $allEnvironments | ForEach-Object {
+                Write-Host "  - Name: $($_.DisplayName)" -ForegroundColor Yellow
+                Write-Host "    ID: $($_.EnvironmentName)" -ForegroundColor Yellow
+                if ($_.Internal.properties.instanceUrl) {
+                    Write-Host "    URL: $($_.Internal.properties.instanceUrl)" -ForegroundColor Yellow
+                }
+                Write-Host "" -ForegroundColor Yellow
+            }
+            Write-Error "Environment not found for URL: $EnvironmentUrl"
+            Write-Error "Please verify the environment URL matches one of the available environments above."
+            exit 1
+        }
     }
     
     Write-Host "Found environment: $($environment.DisplayName)" -ForegroundColor Green
@@ -148,18 +305,28 @@ try {
     Write-Host "📋 Discovering agents in environment..." -ForegroundColor Cyan
     Write-Host "Environment ID: $($environment.EnvironmentName)" -ForegroundColor Gray
     
-    # Check authentication status
-    $powerAppsAccount = Get-PowerAppsAccount
-    if (!$powerAppsAccount -or !$powerAppsAccount.AccessToken) {
-        Write-Error "❌ Power Apps authentication failed or token not available"
+    # Check authentication status and get access token
+    $accessToken = $null
+    
+    # Try to get token from PowerApps account first
+    $powerAppsAccount = Get-PowerAppsAccount -ErrorAction SilentlyContinue
+    if ($powerAppsAccount -and $powerAppsAccount.AccessToken) {
+        $accessToken = $powerAppsAccount.AccessToken
+        Write-Host "✅ Using PowerApps account token" -ForegroundColor Green
+    }
+    # Fall back to direct API token if available
+    elseif ($directApiToken) {
+        $accessToken = $directApiToken
+        Write-Host "✅ Using direct API token" -ForegroundColor Green
+    }
+    else {
+        Write-Error "❌ No valid access token available from any authentication method"
         exit 1
     }
     
-    Write-Host "✅ Authentication verified" -ForegroundColor Green
-    
     # Use REST API to get chatbots (agents)
     $headers = @{
-        'Authorization' = "Bearer $($powerAppsAccount.AccessToken)"
+        'Authorization' = "Bearer $accessToken"
         'Content-Type' = 'application/json'
         'Accept' = 'application/json'
     }
