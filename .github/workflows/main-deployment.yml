@@ -47,8 +47,15 @@ jobs:
         # Trust PowerShell Gallery
         Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
         
-        # Install required providers
-        Install-PackageProvider -Name "NuGet" -MinimumVersion "2.8.5.201" -Force -Scope CurrentUser
+        # Try to install NuGet package provider with fallback
+        try {
+          Write-Host "Installing NuGet package provider..." -ForegroundColor Yellow
+          Install-PackageProvider -Name "NuGet" -MinimumVersion "2.8.5.201" -Force -Scope CurrentUser -ErrorAction Stop
+          Write-Host "✅ NuGet package provider installed successfully" -ForegroundColor Green
+        } catch {
+          Write-Host "⚠️ NuGet package provider installation failed, continuing without it..." -ForegroundColor Yellow
+          Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+        }
         
         Write-Host "✅ PowerShell environment configured" -ForegroundColor Green
         
@@ -151,8 +158,8 @@ jobs:
           & $scriptPath @params
           Write-Host "✅ Agent deployment completed successfully!" -ForegroundColor Green
         } catch {
-          Write-Host "❌ Agent deployment failed: $($_.Exception.Message)" -ForegroundColor Red
-          Write-Host "Stack trace: $($_.Exception.StackTrace)" -ForegroundColor Red
+          Write-Host "❌ Agent deployment failed: $($_" + ".Exception.Message)" -ForegroundColor Red
+          Write-Host "Stack trace: $($_" + ".Exception.StackTrace)" -ForegroundColor Red
           exit 1
         }
       env:

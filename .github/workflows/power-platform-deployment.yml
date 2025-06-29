@@ -228,40 +228,85 @@ jobs:
       run: |
         Write-Host "🤖 Starting Post-Deployment Agent Configuration..." -ForegroundColor Green
         
-        # Setup PowerShell environment for PowerApps modules
-        Write-Host "🔧 Setting up PowerShell environment..." -ForegroundColor Cyan
-        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-        Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
-        Install-PackageProvider -Name "NuGet" -MinimumVersion "2.8.5.201" -Force -Scope CurrentUser
-        
-        # Install PowerApps modules with enhanced error handling
-        Write-Host "📦 Installing PowerApps PowerShell modules..." -ForegroundColor Cyan
-        $modules = @(
-          "Microsoft.PowerApps.Administration.PowerShell",
-          "Microsoft.PowerApps.PowerShell"
-        )
-        
-        foreach ($module in $modules) {
+        # Use the dedicated PowerApps module installation script
+        Write-Host "🔧 Installing PowerApps modules using dedicated script..." -ForegroundColor Cyan
+        try {
+          & "${{ github.workspace }}\scripts\install-powerapps-modules.ps1" -Verbose
+          Write-Host "✅ PowerApps modules installation completed" -ForegroundColor Green
+        } catch {
+          Write-Host "⚠️ PowerApps module installation script failed, trying fallback method..." -ForegroundColor Yellow
+          Write-Host "Error: $($_" + ".Exception.Message)" -ForegroundColor Red
+          
+          # Fallback: Basic PowerShell environment setup
+          Write-Host "🔧 Setting up PowerShell environment (fallback)..." -ForegroundColor Cyan
+          Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+          Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
+          
+          # Try to install NuGet package provider with fallback
           try {
-            Write-Host "Installing $module..." -ForegroundColor Yellow
-            Install-Module -Name $module -Repository PSGallery -Force -AllowClobber -Scope CurrentUser -AcceptLicense -ErrorAction Stop
-            Import-Module -Name $module -Force -ErrorAction Stop
-            Write-Host "✅ Successfully installed $module" -ForegroundColor Green
+            Write-Host "Installing NuGet package provider..." -ForegroundColor Yellow
+            Install-PackageProvider -Name "NuGet" -MinimumVersion "2.8.5.201" -Force -Scope CurrentUser -ErrorAction Stop
+            Write-Host "✅ NuGet package provider installed successfully" -ForegroundColor Green
           } catch {
-            Write-Host "❌ Failed to install $module`: $($_.Exception.Message)" -ForegroundColor Red
-            # Try alternative method
+            Write-Host "⚠️ NuGet package provider installation failed, continuing without it..." -ForegroundColor Yellow
+            Write-Host "Error: $($_" + ".Exception.Message)" -ForegroundColor Red
+          }
+          
+          # Install PowerApps modules with enhanced error handling
+          Write-Host "📦 Installing PowerApps PowerShell modules..." -ForegroundColor Cyan
+          $modules = @(
+            "Microsoft.PowerApps.Administration.PowerShell",
+            "Microsoft.PowerApps.PowerShell"
+          )
+          
+          foreach ($module in $modules) {
+            Write-Host "Installing $module..." -ForegroundColor Yellow
+            $installed = $false
+            
+            # Method 1: Try Install-Module
             try {
-              Install-Package -Name $module -Source PowerShellGallery -Force -Scope CurrentUser -ErrorAction Stop
+              Install-Module -Name $module -Repository PSGallery -Force -AllowClobber -Scope CurrentUser -AcceptLicense -ErrorAction Stop
               Import-Module -Name $module -Force -ErrorAction Stop
-              Write-Host "✅ Successfully installed $module via Install-Package" -ForegroundColor Green
+              Write-Host "✅ Successfully installed $module via Install-Module" -ForegroundColor Green
+              $installed = $true
             } catch {
-              Write-Warning "⚠️ Could not install $module. Script will use REST API fallbacks."
+              Write-Host "⚠️ Install-Module failed for $module`: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+            
+            # Method 2: Try Install-Package if Install-Module failed
+            if (-not $installed) {
+              try {
+                Install-Package -Name $module -Source PowerShellGallery -Force -Scope CurrentUser -ErrorAction Stop
+                Import-Module -Name $module -Force -ErrorAction Stop
+                Write-Host "✅ Successfully installed $module via Install-Package" -ForegroundColor Green
+                $installed = $true
+              } catch {
+                Write-Host "⚠️ Install-Package failed for $module`: $($_.Exception.Message)" -ForegroundColor Yellow
+              }
+            }
+            
+            # Method 3: Try Find-Module and install without NuGet provider
+            if (-not $installed) {
+              try {
+                $moduleInfo = Find-Module -Name $module -Repository PSGallery -ErrorAction Stop
+                Save-Module -Name $module -Path "$env:USERPROFILE\Documents\PowerShell\Modules" -Force -ErrorAction Stop
+                Import-Module -Name $module -Force -ErrorAction Stop
+                Write-Host "✅ Successfully installed $module via Save-Module" -ForegroundColor Green
+                $installed = $true
+              } catch {
+                Write-Host "⚠️ Save-Module failed for $module`: $($_.Exception.Message)" -ForegroundColor Yellow
+              }
+            }
+            
+            if (-not $installed) {
+              Write-Warning "❌ Could not install $module with any method. Script will use REST API fallbacks."
             }
           }
         }
         
         # Verify module installation
         Write-Host "🔍 Verifying PowerApps modules..." -ForegroundColor Cyan
+        $modules = @("Microsoft.PowerApps.Administration.PowerShell", "Microsoft.PowerApps.PowerShell")
         foreach ($module in $modules) {
           $loadedModule = Get-Module -Name $module -ErrorAction SilentlyContinue
           if ($loadedModule) {
@@ -283,7 +328,7 @@ jobs:
             -EnableAgent $true
           Write-Host "✅ Agent configuration completed successfully!" -ForegroundColor Green
         } catch {
-          Write-Host "❌ Agent configuration failed: $($_.Exception.Message)" -ForegroundColor Red
+          Write-Host "❌ Agent configuration failed: $($_" + ".Exception.Message)" -ForegroundColor Red
           throw
         }
 
