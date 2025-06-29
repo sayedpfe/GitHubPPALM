@@ -34,7 +34,18 @@ jobs:
         lfs: true
 
     - name: Setup Power Platform CLI
-      uses: microsoft/powerplatform-actions/actions-install@v1
+      run: |
+        # Install .NET 6.0 SDK (if not already available)
+        winget install Microsoft.DotNet.SDK.6 --silent --accept-package-agreements --accept-source-agreements
+        
+        # Install Power Platform CLI as a .NET global tool
+        dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+        
+        # Verify installation
+        pac --version
+        
+        # List authentication profiles to verify CLI is working
+        pac auth list
 
     - name: Authenticate to Dev Environment
       run: |
@@ -85,7 +96,15 @@ jobs:
         path: ${{ env.SOLUTION_FOLDER }}
 
     - name: Setup Power Platform CLI
-      uses: microsoft/powerplatform-actions/actions-install@v1
+      run: |
+        # Install .NET 6.0 SDK (if not already available)
+        winget install Microsoft.DotNet.SDK.6 --silent --accept-package-agreements --accept-source-agreements
+        
+        # Install Power Platform CLI as a .NET global tool
+        dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+        
+        # Verify installation
+        pac --version
 
     - name: Pack managed solution
       uses: microsoft/powerplatform-actions/pack-solution@v1
@@ -118,7 +137,15 @@ jobs:
         path: ${{ env.SOLUTION_FOLDER }}
 
     - name: Setup Power Platform CLI
-      uses: microsoft/powerplatform-actions/actions-install@v1
+      run: |
+        # Install .NET 6.0 SDK (if not already available)
+        winget install Microsoft.DotNet.SDK.6 --silent --accept-package-agreements --accept-source-agreements
+        
+        # Install Power Platform CLI as a .NET global tool
+        dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+        
+        # Verify installation
+        pac --version
 
     - name: Authenticate to Production Environment
       run: |
@@ -182,7 +209,15 @@ jobs:
         path: ${{ env.SOLUTION_EXPORTED_FOLDER }}
 
     - name: Setup Power Platform CLI
-      uses: microsoft/powerplatform-actions/actions-install@v1
+      run: |
+        # Install .NET 6.0 SDK (if not already available)
+        winget install Microsoft.DotNet.SDK.6 --silent --accept-package-agreements --accept-source-agreements
+        
+        # Install Power Platform CLI as a .NET global tool
+        dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+        
+        # Verify installation
+        pac --version
 
     - name: Run Solution Checker
       uses: microsoft/powerplatform-actions/check-solution@v1
