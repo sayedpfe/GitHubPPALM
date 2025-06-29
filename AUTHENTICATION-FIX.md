@@ -1,13 +1,30 @@
 # 🚨 Authentication Error Fix
 
-## Error: "Must provide either username/password or app-id/client-secret/tenant-id for authentication!"
+## Error: "PAC is not installed. Please run the actions-install action first."
 
 ### ✅ **Issue Fixed in Workflow**
-I've updated the GitHub Actions workflow to include authentication parameters in all PowerPlatform actions and fixed the CLI verification command.
+I've updated the GitHub Actions workflow to use the official Microsoft PowerPlatform actions for CLI installation and fixed all authentication parameters.
 
 ### 🔧 **What Was Changed**
 
-**1. Authentication Parameters Fixed:**
+**1. CLI Installation Method Fixed:**
+
+**Before (causing "PAC is not installed" error):**
+```yaml
+- name: Setup Power Platform CLI
+  run: |
+    # Install Power Platform CLI as a .NET global tool
+    dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+    # This doesn't work with PowerPlatform actions
+```
+
+**After (fixed):**
+```yaml
+- name: Setup Power Platform CLI
+  uses: microsoft/powerplatform-actions/actions-install@v1
+```
+
+**2. Authentication Parameters Fixed:**
 
 **Before (causing the error):**
 ```yaml

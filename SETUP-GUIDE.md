@@ -161,6 +161,12 @@ This script will check:
 **Recommended CI/CD Installation Method:**
 ```yaml
 - name: Setup Power Platform CLI
+  uses: microsoft/powerplatform-actions/actions-install@v1
+```
+
+**Alternative: Manual Installation (if needed):**
+```yaml
+- name: Setup Power Platform CLI
   run: |
     # Install Power Platform CLI as a .NET global tool
     dotnet tool install --global Microsoft.PowerApps.CLI.Tool

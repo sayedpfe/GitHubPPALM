@@ -34,16 +34,7 @@ jobs:
         lfs: true
 
     - name: Setup Power Platform CLI
-      run: |
-        # Install Power Platform CLI as a .NET global tool
-        dotnet tool install --global Microsoft.PowerApps.CLI.Tool
-        
-        # Refresh environment variables to ensure pac is in PATH
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
-        
-        # Verify installation and show help
-        pac help
-      shell: pwsh
+      uses: microsoft/powerplatform-actions/actions-install@v1
 
     - name: Export solution
       uses: microsoft/powerplatform-actions/export-solution@v1
@@ -92,16 +83,7 @@ jobs:
         path: ${{ env.SOLUTION_FOLDER }}
 
     - name: Setup Power Platform CLI
-      run: |
-        # Install Power Platform CLI as a .NET global tool
-        dotnet tool install --global Microsoft.PowerApps.CLI.Tool
-        
-        # Refresh environment variables to ensure pac is in PATH
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
-        
-        # Verify installation and show help
-        pac help
-      shell: pwsh
+      uses: microsoft/powerplatform-actions/actions-install@v1
 
     - name: Pack managed solution
       uses: microsoft/powerplatform-actions/pack-solution@v1
@@ -134,16 +116,7 @@ jobs:
         path: ${{ env.SOLUTION_FOLDER }}
 
     - name: Setup Power Platform CLI
-      run: |
-        # Install Power Platform CLI as a .NET global tool
-        dotnet tool install --global Microsoft.PowerApps.CLI.Tool
-        
-        # Refresh environment variables to ensure pac is in PATH
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
-        
-        # Verify installation and show help
-        pac help
-      shell: pwsh
+      uses: microsoft/powerplatform-actions/actions-install@v1
 
     - name: Import solution to Production
       uses: microsoft/powerplatform-actions/import-solution@v1
@@ -210,16 +183,7 @@ jobs:
         path: ${{ env.SOLUTION_EXPORTED_FOLDER }}
 
     - name: Setup Power Platform CLI
-      run: |
-        # Install Power Platform CLI as a .NET global tool
-        dotnet tool install --global Microsoft.PowerApps.CLI.Tool
-        
-        # Refresh environment variables to ensure pac is in PATH
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
-        
-        # Verify installation and show help
-        pac help
-      shell: pwsh
+      uses: microsoft/powerplatform-actions/actions-install@v1
 
     - name: Run Solution Checker
       uses: microsoft/powerplatform-actions/check-solution@v1
