@@ -11,6 +11,13 @@ on:
         required: false
         default: '7.x'
         type: string
+  workflow_dispatch:
+    inputs:
+      powershell-version:
+        description: 'PowerShell version to use'
+        required: false
+        default: '7.x'
+        type: string
 
 jobs:
   install-powerapps-modules:

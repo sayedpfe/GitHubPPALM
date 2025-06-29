@@ -1,3 +1,22 @@
+# SETUP REQUIRED:
+# ===============
+# Repository Secrets (Settings > Secrets and variables > Actions):
+# - DEV_ENVIRONMENT_URL: Your development environment URL (e.g., https://yourorg-dev.crm.dynamics.com)
+# - PROD_ENVIRONMENT_URL: Your production environment URL (e.g., https://yourorg.crm.dynamics.com)
+# - POWER_PLATFORM_SP_APP_ID: Service principal Application (client) ID
+# - POWER_PLATFORM_SP_CLIENT_SECRET: Service principal client secret
+# - POWER_PLATFORM_TENANT_ID: Azure AD tenant ID
+#
+# Repository Variables (Settings > Secrets and variables > Actions > Variables):
+# - ENABLE_TEAMS_CHANNEL: Set to 'true' to enable Teams channel configuration
+# - ENABLE_WEBSITE_CHANNEL: Set to 'true' to enable Website channel configuration
+# - SHARE_WITH_GROUP: Group name to share agents with (optional, defaults to 'All Company')
+#
+# Service Principal Setup:
+# 1. Run: az ad sp create-for-rbac --name "GitHubActions-PowerPlatform" --role contributor
+# 2. In Azure AD, assign "Power Platform Administrator" role
+# 3. Grant API permissions for Power Platform services
+
 name: Power Platform Solution Deployment
 
 on:
@@ -207,13 +226,66 @@ jobs:
       if: success()
       shell: pwsh
       run: |
-        ${{ github.workspace }}/scripts/post-deploy-agent.ps1 `
-          -EnvironmentUrl "${{ secrets.PROD_ENVIRONMENT_URL }}" `
-          -ClientId "${{ secrets.POWER_PLATFORM_SP_APP_ID }}" `
-          -ClientSecret "${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}" `
-          -TenantId "${{ secrets.POWER_PLATFORM_TENANT_ID }}" `
-          -PublishAgent $true `
-          -EnableAgent $true
+        Write-Host "🤖 Starting Post-Deployment Agent Configuration..." -ForegroundColor Green
+        
+        # Setup PowerShell environment for PowerApps modules
+        Write-Host "🔧 Setting up PowerShell environment..." -ForegroundColor Cyan
+        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+        Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
+        Install-PackageProvider -Name "NuGet" -MinimumVersion "2.8.5.201" -Force -Scope CurrentUser
+        
+        # Install PowerApps modules with enhanced error handling
+        Write-Host "📦 Installing PowerApps PowerShell modules..." -ForegroundColor Cyan
+        $modules = @(
+          "Microsoft.PowerApps.Administration.PowerShell",
+          "Microsoft.PowerApps.PowerShell"
+        )
+        
+        foreach ($module in $modules) {
+          try {
+            Write-Host "Installing $module..." -ForegroundColor Yellow
+            Install-Module -Name $module -Repository PSGallery -Force -AllowClobber -Scope CurrentUser -AcceptLicense -ErrorAction Stop
+            Import-Module -Name $module -Force -ErrorAction Stop
+            Write-Host "✅ Successfully installed $module" -ForegroundColor Green
+          } catch {
+            Write-Host "❌ Failed to install $module: $($_.Exception.Message)" -ForegroundColor Red
+            # Try alternative method
+            try {
+              Install-Package -Name $module -Source PowerShellGallery -Force -Scope CurrentUser -ErrorAction Stop
+              Import-Module -Name $module -Force -ErrorAction Stop
+              Write-Host "✅ Successfully installed $module via Install-Package" -ForegroundColor Green
+            } catch {
+              Write-Warning "⚠️ Could not install $module. Script will use REST API fallbacks."
+            }
+          }
+        }
+        
+        # Verify module installation
+        Write-Host "🔍 Verifying PowerApps modules..." -ForegroundColor Cyan
+        foreach ($module in $modules) {
+          $loadedModule = Get-Module -Name $module -ErrorAction SilentlyContinue
+          if ($loadedModule) {
+            Write-Host "✅ $module loaded (Version: $($loadedModule.Version))" -ForegroundColor Green
+          } else {
+            Write-Host "⚠️ $module not loaded - REST API fallbacks will be used" -ForegroundColor Yellow
+          }
+        }
+        
+        # Run the post-deployment script
+        Write-Host "🚀 Running agent configuration script..." -ForegroundColor Green
+        try {
+          ${{ github.workspace }}/scripts/post-deploy-agent.ps1 `
+            -EnvironmentUrl "${{ secrets.PROD_ENVIRONMENT_URL }}" `
+            -ClientId "${{ secrets.POWER_PLATFORM_SP_APP_ID }}" `
+            -ClientSecret "${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}" `
+            -TenantId "${{ secrets.POWER_PLATFORM_TENANT_ID }}" `
+            -PublishAgent $true `
+            -EnableAgent $true
+          Write-Host "✅ Agent configuration completed successfully!" -ForegroundColor Green
+        } catch {
+          Write-Host "❌ Agent configuration failed: $($_.Exception.Message)" -ForegroundColor Red
+          throw
+        }
 
     - name: Configure Agent Channels
       if: success() && (vars.ENABLE_TEAMS_CHANNEL == 'true' || vars.ENABLE_WEBSITE_CHANNEL == 'true')
