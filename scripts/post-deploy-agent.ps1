@@ -361,6 +361,10 @@ if ($missingModules.Count -gt 0) {
     Write-Host "✅ All required modules are functional!" -ForegroundColor Green
 }
 
+# Set script-level variable for module availability
+$script:usePowerShellModules = $functionalModules.Count -gt 0
+$script:directApiToken = $null
+
 try {
     Write-Host "🤖 Starting Agent post-deployment configuration..." -ForegroundColor Green
     
@@ -376,37 +380,43 @@ try {
     # Try multiple authentication approaches
     $authSuccess = $false
     
-    # Method 1: Add-PowerAppsAccount with service principal
-    try {
-        Write-Host "Attempting authentication with service principal..." -ForegroundColor Gray
-        
-        # Verify the cmdlet exists before calling it
-        $addPowerAppsCmd = Get-Command -Name "Add-PowerAppsAccount" -ErrorAction SilentlyContinue
-        if (!$addPowerAppsCmd) {
-            throw "Add-PowerAppsAccount cmdlet not available. Module may not be properly loaded."
+    # Method 1: Add-PowerAppsAccount with service principal (only if modules are functional)
+    if ($script:usePowerShellModules) {
+        try {
+            Write-Host "Attempting authentication with service principal using PowerShell modules..." -ForegroundColor Gray
+            
+            # Verify the cmdlet exists before calling it
+            $addPowerAppsCmd = Get-Command -Name "Add-PowerAppsAccount" -ErrorAction SilentlyContinue
+            if (!$addPowerAppsCmd) {
+                throw "Add-PowerAppsAccount cmdlet not available. Module may not be properly loaded."
+            }
+            
+            Add-PowerAppsAccount -TenantID $TenantId -ApplicationId $ClientId -ClientSecret $ClientSecret -Endpoint prod -ErrorAction Stop
+            
+            # Test if authentication worked
+            $getPowerAppsCmd = Get-Command -Name "Get-PowerAppsAccount" -ErrorAction SilentlyContinue
+            if (!$getPowerAppsCmd) {
+                throw "Get-PowerAppsAccount cmdlet not available. Module may not be properly loaded."
+            }
+            
+            $testAccount = Get-PowerAppsAccount -ErrorAction Stop
+            if ($testAccount) {
+                Write-Host "✅ Service principal authentication successful" -ForegroundColor Green
+                Write-Host "   Account: $($testAccount.UserPrincipalName)" -ForegroundColor Gray
+                $authSuccess = $true
+            }
         }
-        
-        Add-PowerAppsAccount -TenantID $TenantId -ApplicationId $ClientId -ClientSecret $ClientSecret -Endpoint prod -ErrorAction Stop
-        
-        # Test if authentication worked
-        $getPowerAppsCmd = Get-Command -Name "Get-PowerAppsAccount" -ErrorAction SilentlyContinue
-        if (!$getPowerAppsCmd) {
-            throw "Get-PowerAppsAccount cmdlet not available. Module may not be properly loaded."
+        catch {
+            Write-Warning "Service principal authentication failed: $($_.Exception.Message)"
+            Write-Host "   This could be due to:" -ForegroundColor Gray
+            Write-Host "   - PowerShell modules not properly installed" -ForegroundColor Gray
+            Write-Host "   - Service principal credentials incorrect" -ForegroundColor Gray
+            Write-Host "   - Insufficient permissions" -ForegroundColor Gray
+            Write-Host "   Falling back to REST API authentication..." -ForegroundColor Yellow
+            $script:usePowerShellModules = $false
         }
-        
-        $testAccount = Get-PowerAppsAccount -ErrorAction Stop
-        if ($testAccount) {
-            Write-Host "✅ Service principal authentication successful" -ForegroundColor Green
-            Write-Host "   Account: $($testAccount.UserPrincipalName)" -ForegroundColor Gray
-            $authSuccess = $true
-        }
-    }
-    catch {
-        Write-Warning "Service principal authentication failed: $($_.Exception.Message)"
-        Write-Host "   This could be due to:" -ForegroundColor Gray
-        Write-Host "   - PowerShell modules not properly installed" -ForegroundColor Gray
-        Write-Host "   - Service principal credentials incorrect" -ForegroundColor Gray
-        Write-Host "   - Insufficient permissions" -ForegroundColor Gray
+    } else {
+        Write-Host "PowerShell modules not functional, using REST API authentication directly..." -ForegroundColor Yellow
     }
     
     # Method 2: Direct REST API authentication if PowerShell modules fail
@@ -427,7 +437,7 @@ try {
             if ($tokenResponse.access_token) {
                 Write-Host "✅ Direct REST API authentication successful" -ForegroundColor Green
                 $authSuccess = $true
-                $directApiToken = $tokenResponse.access_token
+                $script:directApiToken = $tokenResponse.access_token
             }
         }
         catch {
@@ -510,9 +520,9 @@ try {
         try {
             # Use the token from either authentication method
             $apiToken = $null
-            if ($directApiToken) {
-                $apiToken = $directApiToken
-            } else {
+            if ($script:directApiToken) {
+                $apiToken = $script:directApiToken
+            } elseif ($script:usePowerShellModules) {
                 $powerAppsAccount = Get-PowerAppsAccount -ErrorAction SilentlyContinue
                 if ($powerAppsAccount -and $powerAppsAccount.AccessToken) {
                     $apiToken = $powerAppsAccount.AccessToken
@@ -659,15 +669,17 @@ try {
     # Check authentication status and get access token
     $accessToken = $null
     
-    # Try to get token from PowerApps account first
-    $powerAppsAccount = Get-PowerAppsAccount -ErrorAction SilentlyContinue
-    if ($powerAppsAccount -and $powerAppsAccount.AccessToken) {
-        $accessToken = $powerAppsAccount.AccessToken
-        Write-Host "✅ Using PowerApps account token" -ForegroundColor Green
+    # Try to get token from PowerApps account first (only if modules are available)
+    if ($script:usePowerShellModules) {
+        $powerAppsAccount = Get-PowerAppsAccount -ErrorAction SilentlyContinue
+        if ($powerAppsAccount -and $powerAppsAccount.AccessToken) {
+            $accessToken = $powerAppsAccount.AccessToken
+            Write-Host "✅ Using PowerApps account token" -ForegroundColor Green
+        }
     }
     # Fall back to direct API token if available
-    elseif ($directApiToken) {
-        $accessToken = $directApiToken
+    if (!$accessToken -and $script:directApiToken) {
+        $accessToken = $script:directApiToken
         Write-Host "✅ Using direct API token" -ForegroundColor Green
     }
     else {
