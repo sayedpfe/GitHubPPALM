@@ -17,7 +17,7 @@ on:
         - test
 
 env:
-  SOLUTION_NAME: 'YourSolutionName'  # Replace with your actual solution name
+  SOLUTION_NAME: 'TestAutomationSolution'  # Replace with your actual solution name
   SOLUTION_EXPORTED_FOLDER: 'out/exported/'
   SOLUTION_FOLDER: 'out/solutions/'
   SOLUTION_TARGET_FOLDER: 'solutions/'
@@ -37,12 +37,9 @@ jobs:
       uses: microsoft/powerplatform-actions/actions-install@v1
 
     - name: Authenticate to Dev Environment
-      uses: microsoft/powerplatform-actions/auth@v1
-      with:
-        environment-url: ${{ secrets.DEV_ENVIRONMENT_URL }}
-        app-id: ${{ secrets.POWER_PLATFORM_SP_APP_ID }}
-        client-secret: ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}
-        tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+      run: |
+        pac auth create --url ${{ secrets.DEV_ENVIRONMENT_URL }} --applicationId ${{ secrets.POWER_PLATFORM_SP_APP_ID }} --clientSecret ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }} --tenant ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+        pac auth list
 
     - name: Export solution
       uses: microsoft/powerplatform-actions/export-solution@v1
@@ -124,21 +121,13 @@ jobs:
       uses: microsoft/powerplatform-actions/actions-install@v1
 
     - name: Authenticate to Production Environment
-      uses: microsoft/powerplatform-actions/auth@v1
-      with:
-        environment-url: ${{ secrets.PROD_ENVIRONMENT_URL }}
-        app-id: ${{ secrets.POWER_PLATFORM_SP_APP_ID }}
-        client-secret: ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}
-        tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+      run: |
+        pac auth create --url ${{ secrets.PROD_ENVIRONMENT_URL }} --applicationId ${{ secrets.POWER_PLATFORM_SP_APP_ID }} --clientSecret ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }} --tenant ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+        pac auth list
 
     - name: Import solution to Production
-      uses: microsoft/powerplatform-actions/import-solution@v1
-      with:
-        environment-url: ${{ secrets.PROD_ENVIRONMENT_URL }}
-        solution-file: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
-        force-overwrite: true
-        publish-changes: true
-        skip-dependency-check: false
+      run: |
+        pac solution import --path ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip --force-overwrite --publish-changes --skip-dependency-check false
 
     - name: Post-Deployment Agent Configuration
       if: success()
