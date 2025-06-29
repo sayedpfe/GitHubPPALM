@@ -35,6 +35,22 @@ $requiredModules = @(
 
 Write-Host "🔧 Checking and installing required PowerShell modules..." -ForegroundColor Cyan
 
+# CI/CD Environment Detection and Session Isolation
+$isCICD = $env:CI -eq "true" -or $env:GITHUB_ACTIONS -eq "true" -or $env:AZURE_PIPELINES -eq "true" -or $env:TF_BUILD -eq "true"
+if ($isCICD) {
+    Write-Host "🔍 CI/CD environment detected. Implementing session isolation..." -ForegroundColor Yellow
+    
+    # In CI/CD, force clean the module cache to prevent assembly conflicts
+    try {
+        Get-Module | Where-Object { $_.Name -like "*PowerApps*" } | Remove-Module -Force -ErrorAction SilentlyContinue
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+        Write-Host "   Session isolation applied" -ForegroundColor Gray
+    } catch {
+        Write-Host "   Session isolation warning: $($_.Exception.Message)" -ForegroundColor Gray
+    }
+}
+
 # Check PowerShell Gallery connectivity
 try {
     Write-Host "🌐 Testing PowerShell Gallery connectivity..." -ForegroundColor Gray
@@ -50,11 +66,31 @@ try {
 
 foreach ($module in $requiredModules) {
     try {
-        # Check if module is already loaded
+        # Check if module is already loaded and functional
         $loadedModule = Get-Module -Name $module -ErrorAction SilentlyContinue
         if ($loadedModule) {
-            Write-Host "✅ Module already loaded: $module" -ForegroundColor Green
-            continue
+            # Test if the module is functional by checking for key cmdlets
+            $testCmdlets = switch ($module) {
+                "Microsoft.PowerApps.Administration.PowerShell" { @("Get-AdminPowerAppEnvironment", "Add-PowerAppsAccount") }
+                "Microsoft.PowerApps.PowerShell" { @("Get-PowerAppsAccount") }
+            }
+            
+            $cmdletsAvailable = $true
+            foreach ($cmdlet in $testCmdlets) {
+                if (!(Get-Command -Name $cmdlet -ErrorAction SilentlyContinue)) {
+                    $cmdletsAvailable = $false
+                    break
+                }
+            }
+            
+            if ($cmdletsAvailable) {
+                Write-Host "✅ Module already loaded and functional: $module" -ForegroundColor Green
+                continue
+            } else {
+                Write-Host "⚠️ Module '$module' is loaded but missing cmdlets, will reload" -ForegroundColor Yellow
+                # Remove the problematic module
+                Remove-Module -Name $module -Force -ErrorAction SilentlyContinue
+            }
         }
         
         # Check if module is available but not loaded
@@ -78,15 +114,53 @@ foreach ($module in $requiredModules) {
     } catch {
         Write-Warning "❌ Failed to install/import module '$module': $($_.Exception.Message)"
         
-        # Try alternative installation method
+        # Handle "Assembly with same name is already loaded" error specifically
+        if ($_.Exception.Message -like "*Assembly with same name is already loaded*") {
+            Write-Host "🔧 Detected assembly conflict for: $module" -ForegroundColor Yellow
+            
+            try {
+                # Force remove any conflicting modules
+                Get-Module -Name $module -ErrorAction SilentlyContinue | Remove-Module -Force
+                
+                # Clear any loaded assemblies and force garbage collection
+                [System.GC]::Collect()
+                [System.GC]::WaitForPendingFinalizers()
+                [System.GC]::Collect()
+                
+                # Wait a moment for cleanup
+                Start-Sleep -Seconds 2
+                
+                # Try importing again with different approach
+                Import-Module -Name $module -Force -Global -ErrorAction Stop
+                Write-Host "✅ Successfully resolved assembly conflict and imported: $module" -ForegroundColor Green
+                continue
+                
+            } catch {
+                Write-Host "🔄 Assembly conflict resolution failed, trying alternative methods..." -ForegroundColor Yellow
+            }
+        }
+        
+        # Try alternative installation methods
         try {
-            Write-Host "🔄 Trying alternative installation for: $module" -ForegroundColor Yellow
+            Write-Host "🔄 Trying alternative installation method 1 for: $module" -ForegroundColor Yellow
             Install-Package -Name $module -Source PowerShellGallery -Force -Scope CurrentUser -ErrorAction Stop
             Import-Module -Name $module -Force -ErrorAction Stop
             Write-Host "✅ Successfully installed via Install-Package: $module" -ForegroundColor Green
         } catch {
-            Write-Error "❌ All installation methods failed for module '$module'. Please install manually: Install-Module -Name $module -Force"
-            exit 1
+            # Try method 2: Force reinstall
+            try {
+                Write-Host "🔄 Trying alternative installation method 2 for: $module" -ForegroundColor Yellow
+                Uninstall-Module -Name $module -Force -ErrorAction SilentlyContinue
+                Install-Module -Name $module -Force -AllowClobber -Scope CurrentUser -SkipPublisherCheck -ErrorAction Stop
+                Import-Module -Name $module -Force -ErrorAction Stop
+                Write-Host "✅ Successfully reinstalled: $module" -ForegroundColor Green
+            } catch {
+                # Final fallback: Continue without the module (graceful degradation)
+                Write-Warning "⚠️ Could not install module '$module'. Will attempt to continue with REST API fallbacks."
+                Write-Host "   Note: Some PowerShell cmdlet functionality may not be available" -ForegroundColor Yellow
+                Write-Host "   Manual installation command: Install-Module -Name $module -Force -Scope CurrentUser" -ForegroundColor Cyan
+                # Don't exit here - let the script try REST API methods instead
+            }
         }
     }
 }
@@ -94,6 +168,7 @@ foreach ($module in $requiredModules) {
 # Verify modules are properly loaded
 Write-Host "🔍 Verifying module installation..." -ForegroundColor Cyan
 $missingModules = @()
+$functionalModules = @()
 
 foreach ($module in $requiredModules) {
     $loadedModule = Get-Module -Name $module -ErrorAction SilentlyContinue
@@ -101,17 +176,44 @@ foreach ($module in $requiredModules) {
         $missingModules += $module
         Write-Warning "⚠️ Module not loaded: $module"
     } else {
-        Write-Host "✅ Verified loaded: $module (Version: $($loadedModule.Version))" -ForegroundColor Green
+        # Test if the module is functional
+        $testCmdlets = switch ($module) {
+            "Microsoft.PowerApps.Administration.PowerShell" { @("Get-AdminPowerAppEnvironment", "Add-PowerAppsAccount") }
+            "Microsoft.PowerApps.PowerShell" { @("Get-PowerAppsAccount") }
+        }
+        
+        $cmdletsAvailable = $true
+        foreach ($cmdlet in $testCmdlets) {
+            if (!(Get-Command -Name $cmdlet -ErrorAction SilentlyContinue)) {
+                $cmdletsAvailable = $false
+                break
+            }
+        }
+        
+        if ($cmdletsAvailable) {
+            $functionalModules += $module
+            Write-Host "✅ Verified functional: $module (Version: $($loadedModule.Version))" -ForegroundColor Green
+        } else {
+            $missingModules += $module
+            Write-Warning "⚠️ Module loaded but cmdlets missing: $module"
+        }
     }
 }
 
 if ($missingModules.Count -gt 0) {
-    Write-Error "❌ Required modules are not available: $($missingModules -join ', ')"
-    Write-Host "Please run the following commands manually:" -ForegroundColor Yellow
-    foreach ($module in $missingModules) {
-        Write-Host "  Install-Module -Name $module -Force -Scope CurrentUser" -ForegroundColor Yellow
+    if ($functionalModules.Count -eq 0) {
+        Write-Warning "⚠️ No PowerShell modules are functional: $($missingModules -join ', ')"
+        Write-Host "The script will attempt to use REST API fallbacks for all operations." -ForegroundColor Yellow
+        Write-Host "If you encounter issues, please run the following commands manually:" -ForegroundColor Cyan
+        foreach ($module in $missingModules) {
+            Write-Host "  Install-Module -Name $module -Force -Scope CurrentUser" -ForegroundColor Cyan
+        }
+    } else {
+        Write-Warning "⚠️ Some PowerShell modules are not available: $($missingModules -join ', ')"
+        Write-Host "Proceeding with available modules and REST API fallbacks for missing functionality." -ForegroundColor Yellow
     }
-    exit 1
+} else {
+    Write-Host "✅ All required modules are functional!" -ForegroundColor Green
 }
 
 try {
