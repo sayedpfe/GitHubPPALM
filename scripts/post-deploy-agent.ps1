@@ -404,31 +404,31 @@ try {
         $agentId = $agent.name -or $agent.AppName -or $agent.id -or "Unknown"
         Write-Host "  - $agentName (ID: $agentId)" -ForegroundColor Cyan
     }
-        
-        # Filter agents if specific agent name provided
-        if ($AgentName) {
-            $targetAgents = $agents | Where-Object { 
-                ($_.displayName -eq $AgentName) -or 
-                ($_.DisplayName -eq $AgentName) -or 
-                ($_.name -eq $AgentName) -or 
-                ($_.AppName -eq $AgentName) -or
-                ($_.id -eq $AgentName)
-            }
-            if ($targetAgents.Count -eq 0) {
-                Write-Error "Agent '$AgentName' not found in environment"
-                Write-Host "Available agents:" -ForegroundColor Yellow
-                foreach ($agent in $agents) {
-                    $agentName = $agent.displayName -or $agent.DisplayName -or $agent.name -or $agent.AppName -or "Unknown"
-                    Write-Host "  - $agentName" -ForegroundColor Yellow
-                }
-                exit 1
-            }
-        } else {
-            $targetAgents = $agents
+    
+    # Filter agents if specific agent name provided
+    if ($AgentName) {
+        $targetAgents = $agents | Where-Object { 
+            ($_.displayName -eq $AgentName) -or 
+            ($_.DisplayName -eq $AgentName) -or 
+            ($_.name -eq $AgentName) -or 
+            ($_.AppName -eq $AgentName) -or
+            ($_.id -eq $AgentName)
         }
-        
-        # Process each target agent
-        foreach ($agent in $targetAgents) {
+        if ($targetAgents.Count -eq 0) {
+            Write-Error "Agent '$AgentName' not found in environment"
+            Write-Host "Available agents:" -ForegroundColor Yellow
+            foreach ($agent in $agents) {
+                $agentName = $agent.displayName -or $agent.DisplayName -or $agent.name -or $agent.AppName -or "Unknown"
+                Write-Host "  - $agentName" -ForegroundColor Yellow
+            }
+            exit 1
+        }
+    } else {
+        $targetAgents = $agents
+    }
+    
+    # Process each target agent
+    foreach ($agent in $targetAgents) {
             $agentDisplayName = $agent.displayName -or $agent.DisplayName -or $agent.name -or $agent.AppName -or "Unknown Agent"
             $agentId = $agent.name -or $agent.AppName -or $agent.id -or "unknown"
             
@@ -448,7 +448,7 @@ try {
                 foreach ($publishUrl in $publishEndpoints) {
                     try {
                         Write-Host "   Trying publish endpoint: $publishUrl" -ForegroundColor Gray
-                        $publishResponse = Invoke-RestMethod -Uri $publishUrl -Headers $headers -Method Post -ErrorAction Stop
+                        Invoke-RestMethod -Uri $publishUrl -Headers $headers -Method Post -ErrorAction Stop | Out-Null
                         Write-Host "✅ Agent published successfully!" -ForegroundColor Green
                         $publishSuccess = $true
                         
@@ -485,7 +485,7 @@ try {
                 foreach ($enableUrl in $enableEndpoints) {
                     try {
                         Write-Host "   Trying enable endpoint: $enableUrl" -ForegroundColor Gray
-                        $enableResponse = Invoke-RestMethod -Uri $enableUrl -Headers $headers -Method Patch -Body $enableBody -ErrorAction Stop
+                        Invoke-RestMethod -Uri $enableUrl -Headers $headers -Method Patch -Body $enableBody -ErrorAction Stop | Out-Null
                         Write-Host "✅ Agent enabled successfully!" -ForegroundColor Green
                         $enableSuccess = $true
                         break
