@@ -248,7 +248,7 @@ jobs:
             Import-Module -Name $module -Force -ErrorAction Stop
             Write-Host "✅ Successfully installed $module" -ForegroundColor Green
           } catch {
-            Write-Host "❌ Failed to install $module: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "❌ Failed to install $module`: $($_.Exception.Message)" -ForegroundColor Red
             # Try alternative method
             try {
               Install-Package -Name $module -Source PowerShellGallery -Force -Scope CurrentUser -ErrorAction Stop
