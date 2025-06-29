@@ -41,8 +41,8 @@ jobs:
         # Refresh environment variables to ensure pac is in PATH
         $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
         
-        # Verify installation
-        pac --version
+        # Verify installation and show help
+        pac help
       shell: pwsh
 
     - name: Export solution
@@ -99,8 +99,8 @@ jobs:
         # Refresh environment variables to ensure pac is in PATH
         $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
         
-        # Verify installation
-        pac --version
+        # Verify installation and show help
+        pac help
       shell: pwsh
 
     - name: Pack managed solution
@@ -141,8 +141,8 @@ jobs:
         # Refresh environment variables to ensure pac is in PATH
         $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
         
-        # Verify installation
-        pac --version
+        # Verify installation and show help
+        pac help
       shell: pwsh
 
     - name: Import solution to Production
@@ -217,8 +217,8 @@ jobs:
         # Refresh environment variables to ensure pac is in PATH
         $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
         
-        # Verify installation
-        pac --version
+        # Verify installation and show help
+        pac help
       shell: pwsh
 
     - name: Run Solution Checker

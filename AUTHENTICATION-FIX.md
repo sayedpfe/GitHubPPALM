@@ -3,9 +3,11 @@
 ## Error: "Must provide either username/password or app-id/client-secret/tenant-id for authentication!"
 
 ### ✅ **Issue Fixed in Workflow**
-I've updated the GitHub Actions workflow to include authentication parameters in all PowerPlatform actions.
+I've updated the GitHub Actions workflow to include authentication parameters in all PowerPlatform actions and fixed the CLI verification command.
 
 ### 🔧 **What Was Changed**
+
+**1. Authentication Parameters Fixed:**
 
 **Before (causing the error):**
 ```yaml
@@ -27,6 +29,20 @@ I've updated the GitHub Actions workflow to include authentication parameters in
     client-secret: ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }} # ✅ Added
     tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}        # ✅ Added
     solution-name: ${{ env.SOLUTION_NAME }}
+```
+
+**2. CLI Verification Command Fixed:**
+
+**Before (causing "Not a valid command" error):**
+```yaml
+# Verify installation
+pac --version
+```
+
+**After (fixed):**
+```yaml
+# Verify installation and show help
+pac help
 ```
 
 ### 📋 **Next Steps for You**

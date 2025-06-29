@@ -37,7 +37,7 @@ The Power Platform CLI is required for local development and testing. Choose one
 
 3. **Verify installation**:
    ```powershell
-   pac --version
+   pac help
    ```
 
 #### Method 2: .NET Tool (Cross-platform)
@@ -57,7 +57,7 @@ The Power Platform CLI is required for local development and testing. Choose one
 
 4. **Verify installation**:
    ```powershell
-   pac --version
+   pac help
    ```
 
 #### Method 3: Winget (Windows Package Manager)
@@ -131,6 +131,10 @@ This script will check:
 - Solution: Restart your terminal/PowerShell after installation
 - Verify PATH environment variable includes CLI location
 
+**Issue: "Not a valid command" when running pac --version**
+- Solution: Use `pac help` instead of `pac --version` for verification
+- The current CLI version doesn't support --version flag
+
 **Issue: .NET Tool installation fails**
 - Solution: Ensure you have .NET 6.0+ installed
 - Run: `dotnet --version` to check
@@ -164,8 +168,8 @@ This script will check:
     # Refresh environment variables to ensure pac is in PATH
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
     
-    # Verify installation
-    pac --version
+    # Verify installation and show help
+    pac help
   shell: pwsh
 ```
 
