@@ -27,21 +27,101 @@ param(
     [bool]$EnableAgent = $true
 )
 
-# Install required PowerShell modules
+# Install and import required PowerShell modules
 $requiredModules = @(
     "Microsoft.PowerApps.Administration.PowerShell",
     "Microsoft.PowerApps.PowerShell"
 )
 
-foreach ($module in $requiredModules) {
-    if (!(Get-Module -ListAvailable -Name $module)) {
-        Write-Host "Installing module: $module" -ForegroundColor Yellow
-        Install-Module -Name $module -Force -AllowClobber -Scope CurrentUser
+Write-Host "🔧 Checking and installing required PowerShell modules..." -ForegroundColor Cyan
+
+# Check PowerShell Gallery connectivity
+try {
+    Write-Host "🌐 Testing PowerShell Gallery connectivity..." -ForegroundColor Gray
+    $testConnection = Test-NetConnection -ComputerName "www.powershellgallery.com" -Port 443 -InformationLevel Quiet -ErrorAction SilentlyContinue
+    if ($testConnection) {
+        Write-Host "✅ PowerShell Gallery is accessible" -ForegroundColor Green
+    } else {
+        Write-Warning "⚠️ PowerShell Gallery connectivity test failed - continuing anyway"
     }
+} catch {
+    Write-Host "⚠️ Network connectivity test skipped" -ForegroundColor Gray
+}
+
+foreach ($module in $requiredModules) {
+    try {
+        # Check if module is already loaded
+        $loadedModule = Get-Module -Name $module -ErrorAction SilentlyContinue
+        if ($loadedModule) {
+            Write-Host "✅ Module already loaded: $module" -ForegroundColor Green
+            continue
+        }
+        
+        # Check if module is available but not loaded
+        $availableModule = Get-Module -ListAvailable -Name $module -ErrorAction SilentlyContinue
+        if (!$availableModule) {
+            Write-Host "📦 Installing module: $module" -ForegroundColor Yellow
+            
+            # Set TLS to 1.2 for PowerShell Gallery
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            
+            # Install with explicit parameters
+            Install-Module -Name $module -Force -AllowClobber -Scope CurrentUser -Repository PSGallery -ErrorAction Stop
+            Write-Host "✅ Successfully installed: $module" -ForegroundColor Green
+        }
+        
+        # Import the module
+        Write-Host "📥 Importing module: $module" -ForegroundColor Gray
+        Import-Module -Name $module -Force -ErrorAction Stop
+        Write-Host "✅ Successfully imported: $module" -ForegroundColor Green
+        
+    } catch {
+        Write-Warning "❌ Failed to install/import module '$module': $($_.Exception.Message)"
+        
+        # Try alternative installation method
+        try {
+            Write-Host "🔄 Trying alternative installation for: $module" -ForegroundColor Yellow
+            Install-Package -Name $module -Source PowerShellGallery -Force -Scope CurrentUser -ErrorAction Stop
+            Import-Module -Name $module -Force -ErrorAction Stop
+            Write-Host "✅ Successfully installed via Install-Package: $module" -ForegroundColor Green
+        } catch {
+            Write-Error "❌ All installation methods failed for module '$module'. Please install manually: Install-Module -Name $module -Force"
+            exit 1
+        }
+    }
+}
+
+# Verify modules are properly loaded
+Write-Host "🔍 Verifying module installation..." -ForegroundColor Cyan
+$missingModules = @()
+
+foreach ($module in $requiredModules) {
+    $loadedModule = Get-Module -Name $module -ErrorAction SilentlyContinue
+    if (!$loadedModule) {
+        $missingModules += $module
+        Write-Warning "⚠️ Module not loaded: $module"
+    } else {
+        Write-Host "✅ Verified loaded: $module (Version: $($loadedModule.Version))" -ForegroundColor Green
+    }
+}
+
+if ($missingModules.Count -gt 0) {
+    Write-Error "❌ Required modules are not available: $($missingModules -join ', ')"
+    Write-Host "Please run the following commands manually:" -ForegroundColor Yellow
+    foreach ($module in $missingModules) {
+        Write-Host "  Install-Module -Name $module -Force -Scope CurrentUser" -ForegroundColor Yellow
+    }
+    exit 1
 }
 
 try {
     Write-Host "🤖 Starting Agent post-deployment configuration..." -ForegroundColor Green
+    
+    # Diagnostic information
+    Write-Host "🔍 Environment Diagnostics:" -ForegroundColor Cyan
+    Write-Host "   PowerShell Version: $($PSVersionTable.PSVersion)" -ForegroundColor Gray
+    Write-Host "   Execution Policy: $(Get-ExecutionPolicy)" -ForegroundColor Gray
+    Write-Host "   OS: $($PSVersionTable.OS)" -ForegroundColor Gray
     
     # Connect to Power Platform
     Write-Host "Authenticating to Power Platform..." -ForegroundColor Cyan
@@ -52,17 +132,34 @@ try {
     # Method 1: Add-PowerAppsAccount with service principal
     try {
         Write-Host "Attempting authentication with service principal..." -ForegroundColor Gray
-        Add-PowerAppsAccount -TenantID $TenantId -ApplicationId $ClientId -ClientSecret $ClientSecret -Endpoint prod
+        
+        # Verify the cmdlet exists before calling it
+        $addPowerAppsCmd = Get-Command -Name "Add-PowerAppsAccount" -ErrorAction SilentlyContinue
+        if (!$addPowerAppsCmd) {
+            throw "Add-PowerAppsAccount cmdlet not available. Module may not be properly loaded."
+        }
+        
+        Add-PowerAppsAccount -TenantID $TenantId -ApplicationId $ClientId -ClientSecret $ClientSecret -Endpoint prod -ErrorAction Stop
         
         # Test if authentication worked
-        $testAccount = Get-PowerAppsAccount -ErrorAction SilentlyContinue
+        $getPowerAppsCmd = Get-Command -Name "Get-PowerAppsAccount" -ErrorAction SilentlyContinue
+        if (!$getPowerAppsCmd) {
+            throw "Get-PowerAppsAccount cmdlet not available. Module may not be properly loaded."
+        }
+        
+        $testAccount = Get-PowerAppsAccount -ErrorAction Stop
         if ($testAccount) {
             Write-Host "✅ Service principal authentication successful" -ForegroundColor Green
+            Write-Host "   Account: $($testAccount.UserPrincipalName)" -ForegroundColor Gray
             $authSuccess = $true
         }
     }
     catch {
         Write-Warning "Service principal authentication failed: $($_.Exception.Message)"
+        Write-Host "   This could be due to:" -ForegroundColor Gray
+        Write-Host "   - PowerShell modules not properly installed" -ForegroundColor Gray
+        Write-Host "   - Service principal credentials incorrect" -ForegroundColor Gray
+        Write-Host "   - Insufficient permissions" -ForegroundColor Gray
     }
     
     # Method 2: Direct REST API authentication if PowerShell modules fail
@@ -142,6 +239,13 @@ try {
     # Method 1: Try PowerShell cmdlets first
     try {
         Write-Host "Trying PowerShell cmdlets for environment discovery..." -ForegroundColor Gray
+        
+        # Verify the cmdlet exists
+        $getEnvCmd = Get-Command -Name "Get-AdminPowerAppEnvironment" -ErrorAction SilentlyContinue
+        if (!$getEnvCmd) {
+            throw "Get-AdminPowerAppEnvironment cmdlet not available. Module may not be properly loaded."
+        }
+        
         $allEnvironments = Get-AdminPowerAppEnvironment -ErrorAction Stop
         
         if ($allEnvironments.Count -gt 0) {
@@ -372,8 +476,14 @@ try {
         
         # Fallback: Try using PowerShell cmdlets (limited functionality)
         try {
+            # Verify the cmdlet exists
+            $getAppsCmd = Get-Command -Name "Get-AdminPowerApp" -ErrorAction SilentlyContinue
+            if (!$getAppsCmd) {
+                throw "Get-AdminPowerApp cmdlet not available. Module may not be properly loaded."
+            }
+            
             # This may not work for agents specifically, but let's try
-            $powerApps = Get-AdminPowerApp -EnvironmentName $environment.EnvironmentName
+            $powerApps = Get-AdminPowerApp -EnvironmentName $environment.EnvironmentName -ErrorAction Stop
             $agents = $powerApps | Where-Object { $_.AppName -like "*bot*" -or $_.AppName -like "*agent*" -or $_.DisplayName -like "*bot*" -or $_.DisplayName -like "*agent*" }
             
             if ($agents.Count -gt 0) {
