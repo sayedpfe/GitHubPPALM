@@ -41,17 +41,20 @@ if ($isCICD) {
     Write-Host "🔍 CI/CD environment detected. Implementing session isolation..." -ForegroundColor Yellow
     
     # In CI/CD, force clean the module cache to prevent assembly conflicts
-    try {
+    try 
+    {
         Get-Module | Where-Object { $_.Name -like "*PowerApps*" } | Remove-Module -Force -ErrorAction SilentlyContinue
         [System.GC]::Collect()
         [System.GC]::WaitForPendingFinalizers()
         Write-Host "   Session isolation applied" -ForegroundColor Gray
-    } catch {
+    }
+    catch 
+    {
         Write-Host "   Session isolation warning: $($_.Exception.Message)" -ForegroundColor Gray
     }
 }
 
-# Check PowerShell Gallery connectivity
+# Check PowerShell Gallery connectivity and setup
 try {
     Write-Host "🌐 Testing PowerShell Gallery connectivity..." -ForegroundColor Gray
     $testConnection = Test-NetConnection -ComputerName "www.powershellgallery.com" -Port 443 -InformationLevel Quiet -ErrorAction SilentlyContinue
@@ -62,6 +65,112 @@ try {
     }
 } catch {
     Write-Host "⚠️ Network connectivity test skipped" -ForegroundColor Gray
+}
+
+# GitHub Actions specific setup
+if ($env:GITHUB_ACTIONS -eq "true") {
+    Write-Host "🔧 GitHub Actions environment detected - applying specific configurations..." -ForegroundColor Cyan
+    
+    # Set PowerShell execution policy for GitHub Actions
+    try {
+        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force -ErrorAction SilentlyContinue
+        Write-Host "   ✅ Execution policy set for GitHub Actions" -ForegroundColor Green
+    } catch {
+        Write-Host "   ⚠️ Could not set execution policy: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    
+    # Trust PowerShell Gallery for automated installation
+    try {
+        if (-not (Get-PSRepository -Name "PSGallery" -ErrorAction SilentlyContinue | Where-Object {$_.InstallationPolicy -eq "Trusted"})) {
+            Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted -ErrorAction Stop
+            Write-Host "   ✅ PowerShell Gallery set as trusted repository" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "   ⚠️ Could not set PSGallery as trusted: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+    
+    # Configure package management for GitHub Actions
+    try {
+        $packageProvider = Get-PackageProvider -Name "NuGet" -ErrorAction SilentlyContinue
+        if (-not $packageProvider -or $packageProvider.Version -lt "2.8.5.201") {
+            Install-PackageProvider -Name "NuGet" -MinimumVersion "2.8.5.201" -Force -Scope CurrentUser -ErrorAction Stop
+            Write-Host "   ✅ NuGet package provider installed/updated" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "   ⚠️ Could not install NuGet provider: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+# Manual installation function for PowerApps modules
+function Install-PowerAppsModuleManually {
+    param(
+        [string]$ModuleName,
+        [string]$DownloadPath = "$env:TEMP\PowerAppsModules"
+    )
+    
+    Write-Host "🔧 Attempting manual installation of $ModuleName..." -ForegroundColor Yellow
+    
+    try {
+        # Create download directory
+        if (-not (Test-Path $DownloadPath)) {
+            New-Item -Path $DownloadPath -ItemType Directory -Force | Out-Null
+        }
+        
+        # GitHub releases approach for PowerApps modules
+        $githubRepos = @{
+            "Microsoft.PowerApps.Administration.PowerShell" = "microsoft/PowerApps-Samples"
+            "Microsoft.PowerApps.PowerShell" = "microsoft/PowerApps-Samples"
+        }
+        
+        if ($githubRepos.ContainsKey($ModuleName)) {
+            Write-Host "   🔍 Checking GitHub releases for $ModuleName..." -ForegroundColor Gray
+            
+            # Try to get latest release info
+            $repoUrl = "https://api.github.com/repos/$($githubRepos[$ModuleName])/releases/latest"
+            try {
+                $release = Invoke-RestMethod -Uri $repoUrl -ErrorAction Stop
+                Write-Host "   ✅ Found latest release: $($release.tag_name)" -ForegroundColor Green
+            } catch {
+                Write-Host "   ⚠️ Could not access GitHub releases, trying direct PowerShell Gallery download..." -ForegroundColor Yellow
+            }
+        }
+        
+        # Direct PowerShell Gallery download approach
+        Write-Host "   📦 Attempting direct PowerShell Gallery download..." -ForegroundColor Gray
+        
+        # Get module info from PowerShell Gallery API
+        $galleryUrl = "https://www.powershellgallery.com/api/v2/Packages?`$filter=Id%20eq%20'$ModuleName'&`$top=1"
+        $moduleInfo = Invoke-RestMethod -Uri $galleryUrl -ErrorAction Stop
+        
+        if ($moduleInfo.entry) {
+            $downloadUrl = $moduleInfo.entry.content.src
+            $version = $moduleInfo.entry.properties.Version
+            $fileName = "$ModuleName.$version.nupkg"
+            $filePath = Join-Path $DownloadPath $fileName
+            
+            Write-Host "   ⬇️ Downloading $ModuleName version $version..." -ForegroundColor Gray
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $filePath -ErrorAction Stop
+            
+            # Extract and install manually
+            $extractPath = Join-Path $DownloadPath "$ModuleName.$version"
+            Expand-Archive -Path $filePath -DestinationPath $extractPath -Force
+            
+            # Find PowerShell module files
+            $modulePath = Get-ChildItem -Path $extractPath -Recurse -Filter "*.psd1" | Select-Object -First 1
+            if ($modulePath) {
+                # Import the module directly
+                Import-Module -Name $modulePath.FullName -Force -Global -ErrorAction Stop
+                Write-Host "   ✅ Successfully manually installed and imported $ModuleName" -ForegroundColor Green
+                return $true
+            }
+        }
+        
+        return $false
+        
+    } catch {
+        Write-Host "   ❌ Manual installation failed: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
 }
 
 foreach ($module in $requiredModules) {
@@ -155,11 +264,47 @@ foreach ($module in $requiredModules) {
                 Import-Module -Name $module -Force -ErrorAction Stop
                 Write-Host "✅ Successfully reinstalled: $module" -ForegroundColor Green
             } catch {
-                # Final fallback: Continue without the module (graceful degradation)
-                Write-Warning "⚠️ Could not install module '$module'. Will attempt to continue with REST API fallbacks."
-                Write-Host "   Note: Some PowerShell cmdlet functionality may not be available" -ForegroundColor Yellow
-                Write-Host "   Manual installation command: Install-Module -Name $module -Force -Scope CurrentUser" -ForegroundColor Cyan
-                # Don't exit here - let the script try REST API methods instead
+                # Try method 3: Manual installation for CI/CD environments
+                try {
+                    Write-Host "🔄 Trying manual installation method for: $module" -ForegroundColor Yellow
+                    $manualInstallSuccess = Install-PowerAppsModuleManually -ModuleName $module
+                    if ($manualInstallSuccess) {
+                        Write-Host "✅ Successfully manually installed: $module" -ForegroundColor Green
+                    } else {
+                        throw "Manual installation failed"
+                    }
+                } catch {
+                    # Try method 4: GitHub Actions specific installation
+                    if ($env:GITHUB_ACTIONS -eq "true") {
+                        try {
+                            Write-Host "🔄 Trying GitHub Actions specific installation for: $module" -ForegroundColor Yellow
+                            
+                            # Use PowerShell Gallery with different approach for GitHub Actions
+                            $ProgressPreference = 'SilentlyContinue'
+                            Install-Module -Name $module -Repository PSGallery -Force -AllowClobber -Scope CurrentUser -AcceptLicense -ErrorAction Stop
+                            Import-Module -Name $module -Force -PassThru -ErrorAction Stop
+                            Write-Host "✅ Successfully installed via GitHub Actions method: $module" -ForegroundColor Green
+                        } catch {
+                            Write-Host "❌ GitHub Actions installation also failed for: $module" -ForegroundColor Red
+                            Write-Host "   Error: $($_.Exception.Message)" -ForegroundColor Red
+                            
+                            # Final fallback: Continue without the module (graceful degradation)
+                            Write-Warning "⚠️ Could not install module '$module'. Will attempt to continue with REST API fallbacks."
+                            Write-Host "   Note: Some PowerShell cmdlet functionality may not be available" -ForegroundColor Yellow
+                            Write-Host "   For GitHub Actions, add this to your workflow before running the script:" -ForegroundColor Cyan
+                            Write-Host "   - name: Install PowerApps PowerShell Modules" -ForegroundColor Cyan
+                            Write-Host "     run: |" -ForegroundColor Cyan
+                            Write-Host "       Install-Module -Name $module -Force -Scope CurrentUser -Repository PSGallery" -ForegroundColor Cyan
+                            Write-Host "       Import-Module -Name $module -Force" -ForegroundColor Cyan
+                        }
+                    } else {
+                        # Final fallback: Continue without the module (graceful degradation)
+                        Write-Warning "⚠️ Could not install module '$module'. Will attempt to continue with REST API fallbacks."
+                        Write-Host "   Note: Some PowerShell cmdlet functionality may not be available" -ForegroundColor Yellow
+                        Write-Host "   Manual installation command: Install-Module -Name $module -Force -Scope CurrentUser" -ForegroundColor Cyan
+                        # Don't exit here - let the script try REST API methods instead
+                    }
+                }
             }
         }
     }

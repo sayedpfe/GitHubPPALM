@@ -1,0 +1,153 @@
+# Example GitHub Actions workflow for running the post-deploy-agent script
+# This shows how to properly set up PowerApps modules and run the deployment script
+
+name: Deploy Copilot Studio Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment_url:
+        description: 'Power Platform Environment URL'
+        required: true
+        type: string
+      agent_name:
+        description: 'Agent Name (optional - if not provided, all agents will be processed)'
+        required: false
+        type: string
+      publish_agent:
+        description: 'Publish Agent'
+        required: false
+        type: boolean
+        default: true
+      enable_agent:
+        description: 'Enable Agent'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  # These should be set as repository secrets
+  CLIENT_ID: ${{ secrets.POWERPLATFORM_CLIENT_ID }}
+  CLIENT_SECRET: ${{ secrets.POWERPLATFORM_CLIENT_SECRET }}
+  TENANT_ID: ${{ secrets.POWERPLATFORM_TENANT_ID }}
+
+jobs:
+  deploy-agent:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup PowerShell environment
+      shell: pwsh
+      run: |
+        Write-Host "🔧 Setting up PowerShell environment for GitHub Actions..." -ForegroundColor Cyan
+        
+        # Set execution policy
+        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+        
+        # Trust PowerShell Gallery
+        Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
+        
+        # Install required providers
+        Install-PackageProvider -Name "NuGet" -MinimumVersion "2.8.5.201" -Force -Scope CurrentUser
+        
+        Write-Host "✅ PowerShell environment configured" -ForegroundColor Green
+        
+    - name: Install PowerApps PowerShell modules
+      shell: pwsh
+      run: |
+        Write-Host "📦 Installing PowerApps PowerShell modules..." -ForegroundColor Cyan
+        
+        # Run the dedicated installation script
+        $installScript = ".\scripts\install-powerapps-modules.ps1"
+        if (Test-Path $installScript) {
+          & $installScript -Verbose
+        } else {
+          # Fallback to direct installation
+          $modules = @(
+            "Microsoft.PowerApps.Administration.PowerShell",
+            "Microsoft.PowerApps.PowerShell"
+          )
+          
+          foreach ($module in $modules) {
+            Write-Host "Installing $module..." -ForegroundColor Yellow
+            Install-Module -Name $module -Repository PSGallery -Force -AllowClobber -Scope CurrentUser -AcceptLicense
+            Import-Module -Name $module -Force
+            Write-Host "✅ Installed $module" -ForegroundColor Green
+          }
+        }
+        
+    - name: Verify PowerApps modules
+      shell: pwsh
+      run: |
+        Write-Host "🔍 Verifying PowerApps module installation..." -ForegroundColor Cyan
+        
+        $modules = @(
+          "Microsoft.PowerApps.Administration.PowerShell",
+          "Microsoft.PowerApps.PowerShell"
+        )
+        
+        foreach ($module in $modules) {
+          $loadedModule = Get-Module -Name $module
+          if ($loadedModule) {
+            Write-Host "✅ $module loaded successfully (Version: $($loadedModule.Version))" -ForegroundColor Green
+          } else {
+            Write-Host "❌ $module not loaded" -ForegroundColor Red
+            exit 1
+          }
+        }
+        
+        # Test key cmdlets
+        $cmdlets = @("Get-AdminPowerAppEnvironment", "Add-PowerAppsAccount", "Get-PowerAppsAccount")
+        foreach ($cmdlet in $cmdlets) {
+          if (Get-Command -Name $cmdlet -ErrorAction SilentlyContinue) {
+            Write-Host "✅ Cmdlet available: $cmdlet" -ForegroundColor Green
+          } else {
+            Write-Host "❌ Cmdlet missing: $cmdlet" -ForegroundColor Red
+          }
+        }
+        
+    - name: Run post-deployment agent script
+      shell: pwsh
+      run: |
+        Write-Host "🚀 Running post-deployment agent configuration..." -ForegroundColor Green
+        
+        $scriptPath = ".\scripts\post-deploy-agent.ps1"
+        
+        # Prepare parameters
+        $params = @{
+          EnvironmentUrl = "${{ github.event.inputs.environment_url }}"
+          ClientId = $env:CLIENT_ID
+          ClientSecret = $env:CLIENT_SECRET
+          TenantId = $env:TENANT_ID
+          PublishAgent = [bool]::Parse("${{ github.event.inputs.publish_agent }}")
+          EnableAgent = [bool]::Parse("${{ github.event.inputs.enable_agent }}")
+        }
+        
+        # Add agent name if provided
+        if ("${{ github.event.inputs.agent_name }}") {
+          $params.AgentName = "${{ github.event.inputs.agent_name }}"
+        }
+        
+        # Execute the script
+        try {
+          & $scriptPath @params
+          Write-Host "✅ Agent deployment completed successfully!" -ForegroundColor Green
+        } catch {
+          Write-Host "❌ Agent deployment failed: $($_.Exception.Message)" -ForegroundColor Red
+          Write-Host "Stack trace: $($_.Exception.StackTrace)" -ForegroundColor Red
+          exit 1
+        }
+        
+    - name: Output summary
+      shell: pwsh
+      run: |
+        Write-Host "📋 Deployment Summary:" -ForegroundColor Cyan
+        Write-Host "======================" -ForegroundColor Cyan
+        Write-Host "Environment: ${{ github.event.inputs.environment_url }}" -ForegroundColor White
+        Write-Host "Agent Name: ${{ github.event.inputs.agent_name || 'All agents' }}" -ForegroundColor White
+        Write-Host "Publish Agent: ${{ github.event.inputs.publish_agent }}" -ForegroundColor White
+        Write-Host "Enable Agent: ${{ github.event.inputs.enable_agent }}" -ForegroundColor White
+        Write-Host "Status: ✅ Completed" -ForegroundColor Green
