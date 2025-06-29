@@ -20,12 +20,17 @@ $requiredModules = @(
     "Az.Resources"
 )
 
+Write-Host "Checking and installing required modules..." -ForegroundColor Green
 foreach ($module in $requiredModules) {
     if (!(Get-Module -ListAvailable -Name $module)) {
         Write-Host "Installing module: $module" -ForegroundColor Yellow
         Install-Module -Name $module -Force -AllowClobber -Scope CurrentUser
     }
 }
+
+# Check Az module version for compatibility
+$azAccountsModule = Get-Module -ListAvailable -Name "Az.Accounts" | Sort-Object Version -Descending | Select-Object -First 1
+Write-Host "Using Az.Accounts version: $($azAccountsModule.Version)" -ForegroundColor Cyan
 
 # Connect to Azure
 Write-Host "Connecting to Azure..." -ForegroundColor Green
@@ -41,7 +46,22 @@ $servicePrincipal = New-AzADServicePrincipal -ApplicationId $appRegistration.App
 
 # Create Client Secret
 Write-Host "Creating Client Secret..." -ForegroundColor Green
-$clientSecret = New-AzADAppCredential -ApplicationId $appRegistration.AppId -DisplayName "DevOps Secret"
+try {
+    # Try the newer syntax first
+    $clientSecret = New-AzADAppCredential -ObjectId $appRegistration.Id -DisplayName "DevOps Secret"
+}
+catch {
+    Write-Host "Trying alternative syntax for client secret creation..." -ForegroundColor Yellow
+    try {
+        # Alternative syntax for different Az module versions
+        $clientSecret = New-AzADAppCredential -ApplicationId $appRegistration.AppId
+    }
+    catch {
+        Write-Error "Failed to create client secret. Error: $($_.Exception.Message)"
+        Write-Host "You may need to create the client secret manually in Azure Portal." -ForegroundColor Red
+        exit 1
+    }
+}
 
 # Required API permissions for Power Platform
 $requiredResourceAccess = @(
@@ -65,13 +85,20 @@ Write-Host "`n=== SERVICE PRINCIPAL DETAILS ===" -ForegroundColor Cyan
 Write-Host "Application ID: $($appRegistration.AppId)" -ForegroundColor White
 Write-Host "Tenant ID: $TenantId" -ForegroundColor White
 Write-Host "Service Principal Object ID: $($servicePrincipal.Id)" -ForegroundColor White
-Write-Host "Client Secret: $($clientSecret.SecretText)" -ForegroundColor White
-Write-Host "Client Secret ID: $($clientSecret.KeyId)" -ForegroundColor White
+
+if ($clientSecret) {
+    Write-Host "Client Secret: $($clientSecret.SecretText)" -ForegroundColor White
+    Write-Host "Client Secret ID: $($clientSecret.KeyId)" -ForegroundColor White
+    $secretText = $clientSecret.SecretText
+} else {
+    Write-Host "Client Secret: [Manual creation required]" -ForegroundColor Red
+    $secretText = "[CREATE_MANUALLY_IN_PORTAL]"
+}
 
 Write-Host "`n=== NEXT STEPS ===" -ForegroundColor Cyan
 Write-Host "1. Add the following secrets to your GitHub repository:" -ForegroundColor Yellow
 Write-Host "   - POWER_PLATFORM_SP_APP_ID: $($appRegistration.AppId)"
-Write-Host "   - POWER_PLATFORM_SP_CLIENT_SECRET: $($clientSecret.SecretText)"
+Write-Host "   - POWER_PLATFORM_SP_CLIENT_SECRET: $secretText"
 Write-Host "   - POWER_PLATFORM_TENANT_ID: $TenantId"
 
 Write-Host "`n2. Grant admin consent for the API permissions in Azure Portal:" -ForegroundColor Yellow

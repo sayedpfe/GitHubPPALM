@@ -1,21 +1,21 @@
 {
   "environments": {
     "development": {
-      "environmentUrl": "https://yourdev.crm.dynamics.com",
-      "environmentId": "your-dev-environment-id",
-      "displayName": "Development Environment",
+      "environmentUrl": "https://orgf447c64a.crm.dynamics.com",
+      "environmentId": "f83d5886-263c-eb26-ae1e-0e9d39ce4014",
+      "displayName": "Pipeline Env",
       "description": "Development environment for solution building and testing"
     },
     "test": {
-      "environmentUrl": "https://yourtest.crm.dynamics.com", 
-      "environmentId": "your-test-environment-id",
-      "displayName": "Test Environment",
+      "environmentUrl": "https://org57a9088c.crm.dynamics.com", 
+      "environmentId": "72ce94b6-ea08-eb1e-80c5-d0c804dcd912",
+      "displayName": "Dev Env",
       "description": "Testing environment for validation before production"
     },
     "production": {
-      "environmentUrl": "https://yourprod.crm.dynamics.com",
-      "environmentId": "your-prod-environment-id", 
-      "displayName": "Production Environment",
+      "environmentUrl": "https://org25355f75.crm.dynamics.com",
+      "environmentId": "50f3edf1-abe7-e31d-9602-dc56f4f3e404", 
+      "displayName": "Prod",
       "description": "Production environment for end users"
     }
   },
