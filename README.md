@@ -132,3 +132,4 @@ Add these optional secrets for agent-specific configuration:
 🆚 **Comparing with Power Platform Build Tools? See [PIPELINE-COMPARISON.md](./PIPELINE-COMPARISON.md)**
 
 Test Automation 01
+Test Automation 02
