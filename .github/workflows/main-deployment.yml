@@ -158,8 +158,10 @@ jobs:
           & $scriptPath @params
           Write-Host "✅ Agent deployment completed successfully!" -ForegroundColor Green
         } catch {
-          Write-Host "❌ Agent deployment failed: $($_" + ".Exception.Message)" -ForegroundColor Red
-          Write-Host "Stack trace: $($_" + ".Exception.StackTrace)" -ForegroundColor Red
+          Write-Host "❌ Agent deployment failed" -ForegroundColor Red
+          Write-Host $_.Exception.Message -ForegroundColor Red
+          Write-Host "Stack trace:" -ForegroundColor Red
+          Write-Host $_.Exception.StackTrace -ForegroundColor Red
           exit 1
         }
       env:

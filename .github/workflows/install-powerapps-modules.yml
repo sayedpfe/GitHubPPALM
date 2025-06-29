@@ -51,7 +51,8 @@ jobs:
           Write-Host "✅ NuGet package provider installed successfully" -ForegroundColor Green
         } catch {
           Write-Host "⚠️ NuGet package provider installation failed, continuing without it..." -ForegroundColor Yellow
-          Write-Host "Error: $($_" + ".Exception.Message)" -ForegroundColor Red
+          Write-Host "Error details:" -ForegroundColor Red
+          Write-Host $_.Exception.Message -ForegroundColor Red
         }
         
         # Install PowerShellGet if needed
@@ -89,7 +90,8 @@ jobs:
                   Write-Host "✅ Successfully installed $module via Install-Package" -ForegroundColor Green
                 } catch {
                   Write-Host "❌ Failed to install $module with all methods" -ForegroundColor Red
-                  Write-Host "Error: $($_" + ".Exception.Message)" -ForegroundColor Red
+                  Write-Host "Error details:" -ForegroundColor Red
+                  Write-Host $_.Exception.Message -ForegroundColor Red
                   throw
                 }
               }
@@ -117,7 +119,8 @@ jobs:
             
           } catch {
             Write-Host "❌ Failed to install/import $module" -ForegroundColor Red
-            Write-Host "Error: $($_" + ".Exception.Message)" -ForegroundColor Red
+            Write-Host "Error details:" -ForegroundColor Red
+            Write-Host $_.Exception.Message -ForegroundColor Red
             exit 1
           }
         }
@@ -156,6 +159,7 @@ jobs:
           Write-Host "🎉 PowerApps modules are ready for use!" -ForegroundColor Green
           
         } catch {
-          Write-Host "❌ Module functionality test failed: $($_" + ".Exception.Message)" -ForegroundColor Red
+          Write-Host "❌ Module functionality test failed" -ForegroundColor Red
+          Write-Host $_.Exception.Message -ForegroundColor Red
           exit 1
         }

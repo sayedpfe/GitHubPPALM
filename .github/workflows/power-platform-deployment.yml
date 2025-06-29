@@ -235,7 +235,8 @@ jobs:
           Write-Host "✅ PowerApps modules installation completed" -ForegroundColor Green
         } catch {
           Write-Host "⚠️ PowerApps module installation script failed, trying fallback method..." -ForegroundColor Yellow
-          Write-Host "Error: $($_" + ".Exception.Message)" -ForegroundColor Red
+          Write-Host "Error details:" -ForegroundColor Red
+          Write-Host $_.Exception.Message -ForegroundColor Red
           
           # Fallback: Basic PowerShell environment setup
           Write-Host "🔧 Setting up PowerShell environment (fallback)..." -ForegroundColor Cyan
@@ -249,7 +250,8 @@ jobs:
             Write-Host "✅ NuGet package provider installed successfully" -ForegroundColor Green
           } catch {
             Write-Host "⚠️ NuGet package provider installation failed, continuing without it..." -ForegroundColor Yellow
-            Write-Host "Error: $($_" + ".Exception.Message)" -ForegroundColor Red
+            Write-Host "Error details:" -ForegroundColor Red
+            Write-Host $_.Exception.Message -ForegroundColor Red
           }
           
           # Install PowerApps modules with enhanced error handling
@@ -328,7 +330,8 @@ jobs:
             -EnableAgent $true
           Write-Host "✅ Agent configuration completed successfully!" -ForegroundColor Green
         } catch {
-          Write-Host "❌ Agent configuration failed: $($_" + ".Exception.Message)" -ForegroundColor Red
+          Write-Host "❌ Agent configuration failed" -ForegroundColor Red
+          Write-Host $_.Exception.Message -ForegroundColor Red
           throw
         }
 
