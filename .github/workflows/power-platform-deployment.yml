@@ -43,20 +43,15 @@ jobs:
         
         # Verify installation
         pac --version
-        
-        # List authentication profiles to verify CLI is working
-        pac auth list
       shell: pwsh
-
-    - name: Authenticate to Dev Environment
-      run: |
-        pac auth create --url ${{ secrets.DEV_ENVIRONMENT_URL }} --applicationId ${{ secrets.POWER_PLATFORM_SP_APP_ID }} --clientSecret ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }} --tenant ${{ secrets.POWER_PLATFORM_TENANT_ID }}
-        pac auth list
 
     - name: Export solution
       uses: microsoft/powerplatform-actions/export-solution@v1
       with:
         environment-url: ${{ secrets.DEV_ENVIRONMENT_URL }}
+        app-id: ${{ secrets.POWER_PLATFORM_SP_APP_ID }}
+        client-secret: ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}
+        tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
         solution-name: ${{ env.SOLUTION_NAME }}
         solution-output-file: ${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}.zip
         managed: false
@@ -150,14 +145,17 @@ jobs:
         pac --version
       shell: pwsh
 
-    - name: Authenticate to Production Environment
-      run: |
-        pac auth create --url ${{ secrets.PROD_ENVIRONMENT_URL }} --applicationId ${{ secrets.POWER_PLATFORM_SP_APP_ID }} --clientSecret ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }} --tenant ${{ secrets.POWER_PLATFORM_TENANT_ID }}
-        pac auth list
-
     - name: Import solution to Production
-      run: |
-        pac solution import --path ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip --force-overwrite --publish-changes --skip-dependency-check false
+      uses: microsoft/powerplatform-actions/import-solution@v1
+      with:
+        environment-url: ${{ secrets.PROD_ENVIRONMENT_URL }}
+        app-id: ${{ secrets.POWER_PLATFORM_SP_APP_ID }}
+        client-secret: ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}
+        tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
+        solution-file: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+        force-overwrite: true
+        publish-changes: true
+        skip-dependency-check: false
 
     - name: Post-Deployment Agent Configuration
       if: success()
