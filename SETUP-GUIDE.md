@@ -145,6 +145,30 @@ This script will check:
 - Check your network connectivity
 - Consider using service principal authentication for better performance
 
+### GitHub Actions Compatibility Notes
+
+**⚠️ Important for CI/CD Pipelines:**
+
+- **Windows Package Manager (winget) is not available** on GitHub Actions Windows runners
+- Our workflow uses the **.NET global tool method** for CLI installation, which is the most reliable approach for CI/CD
+- **Avoid using winget commands** in GitHub Actions workflows
+- The workflow automatically handles PATH configuration for the pac CLI
+
+**Recommended CI/CD Installation Method:**
+```yaml
+- name: Setup Power Platform CLI
+  run: |
+    # Install Power Platform CLI as a .NET global tool
+    dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+    
+    # Refresh environment variables to ensure pac is in PATH
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+    
+    # Verify installation
+    pac --version
+  shell: pwsh
+```
+
 ### 🔧 Additional Tools (Optional but Recommended)
 
 #### **Azure CLI** (for service principal management):

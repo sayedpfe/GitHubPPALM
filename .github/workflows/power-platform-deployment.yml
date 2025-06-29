@@ -35,17 +35,18 @@ jobs:
 
     - name: Setup Power Platform CLI
       run: |
-        # Install .NET 6.0 SDK (if not already available)
-        winget install Microsoft.DotNet.SDK.6 --silent --accept-package-agreements --accept-source-agreements
-        
         # Install Power Platform CLI as a .NET global tool
         dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+        
+        # Refresh environment variables to ensure pac is in PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
         
         # Verify installation
         pac --version
         
         # List authentication profiles to verify CLI is working
         pac auth list
+      shell: pwsh
 
     - name: Authenticate to Dev Environment
       run: |
@@ -97,14 +98,15 @@ jobs:
 
     - name: Setup Power Platform CLI
       run: |
-        # Install .NET 6.0 SDK (if not already available)
-        winget install Microsoft.DotNet.SDK.6 --silent --accept-package-agreements --accept-source-agreements
-        
         # Install Power Platform CLI as a .NET global tool
         dotnet tool install --global Microsoft.PowerApps.CLI.Tool
         
+        # Refresh environment variables to ensure pac is in PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+        
         # Verify installation
         pac --version
+      shell: pwsh
 
     - name: Pack managed solution
       uses: microsoft/powerplatform-actions/pack-solution@v1
@@ -138,14 +140,15 @@ jobs:
 
     - name: Setup Power Platform CLI
       run: |
-        # Install .NET 6.0 SDK (if not already available)
-        winget install Microsoft.DotNet.SDK.6 --silent --accept-package-agreements --accept-source-agreements
-        
         # Install Power Platform CLI as a .NET global tool
         dotnet tool install --global Microsoft.PowerApps.CLI.Tool
         
+        # Refresh environment variables to ensure pac is in PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+        
         # Verify installation
         pac --version
+      shell: pwsh
 
     - name: Authenticate to Production Environment
       run: |
@@ -210,14 +213,15 @@ jobs:
 
     - name: Setup Power Platform CLI
       run: |
-        # Install .NET 6.0 SDK (if not already available)
-        winget install Microsoft.DotNet.SDK.6 --silent --accept-package-agreements --accept-source-agreements
-        
         # Install Power Platform CLI as a .NET global tool
         dotnet tool install --global Microsoft.PowerApps.CLI.Tool
         
+        # Refresh environment variables to ensure pac is in PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+        
         # Verify installation
         pac --version
+      shell: pwsh
 
     - name: Run Solution Checker
       uses: microsoft/powerplatform-actions/check-solution@v1

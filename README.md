@@ -1,6 +1,25 @@
 # Power Platform Automated Deployment
 
-This repository contains the setup for automated deployment of Power Platform solutions from development to production environments.
+🚀 **STATUS: PRODUCTION READY** ✅ | [View Detailed Status](./DEPLOYMENT-STATUS.md)
+
+This repository contains a complete automated deployment solution for Power Platform solutions and Copilot Studio agents from development to production environments.
+
+## 🎯 Quick Start
+
+1. **Clone/Fork** this repository
+2. **Run setup script**: `.\scripts\test-setup.ps1`
+3. **Create service principal**: `.\scripts\setup-service-principal.ps1`
+4. **Configure GitHub secrets** (see [Setup Guide](./SETUP-GUIDE.md))
+5. **Push to main** to trigger deployment
+
+## ✨ Features
+
+- ✅ **Complete CI/CD Pipeline** for Power Platform solutions
+- ✅ **Copilot Studio Agent Deployment** with channel configuration
+- ✅ **Multi-Environment Support** (dev → test → production)
+- ✅ **Service Principal Authentication** for secure automation
+- ✅ **GitHub Actions & Azure DevOps** pipeline support
+- ✅ **Local Development Tools** for testing and validation
 
 ## Overview
 
@@ -131,5 +150,37 @@ Add these optional secrets for agent-specific configuration:
 
 🆚 **Comparing with Power Platform Build Tools? See [PIPELINE-COMPARISON.md](./PIPELINE-COMPARISON.md)**
 
-Test Automation 01
-Test Automation 02
+## 📚 Complete Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [SETUP-GUIDE.md](./SETUP-GUIDE.md) | 🔧 **Complete setup instructions** - Power Platform CLI installation, service principal creation, GitHub secrets configuration |
+| [AGENT-DEPLOYMENT-GUIDE.md](./AGENT-DEPLOYMENT-GUIDE.md) | 🤖 **Agent-specific guidance** - Copilot Studio agent deployment, channel configuration, sharing options |
+| [PIPELINE-COMPARISON.md](./PIPELINE-COMPARISON.md) | 🆚 **Platform comparison** - GitHub Actions vs Azure DevOps, feature comparison, migration guidance |
+| [DEPLOYMENT-STATUS.md](./DEPLOYMENT-STATUS.md) | ✅ **Current status** - What's implemented, working components, production readiness |
+
+## 🚀 Getting Started
+
+**Quick Setup (5 minutes):**
+```powershell
+# 1. Test your local setup
+.\scripts\test-setup.ps1
+
+# 2. Create service principal
+.\scripts\setup-service-principal.ps1 -TenantId "your-tenant-id"
+
+# 3. Add GitHub secrets (see SETUP-GUIDE.md)
+# 4. Push to main branch - pipeline runs automatically!
+```
+
+## 🎯 Status Summary
+
+**✅ Production Ready** - Complete automation for Power Platform solution and agent deployment
+- All CLI compatibility issues resolved (Windows runners, .NET global tool)
+- Service principal authentication working
+- Multi-environment pipeline tested
+- Comprehensive documentation provided
+
+---
+
+*Last updated: December 2024*
