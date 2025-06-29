@@ -361,6 +361,11 @@ if ($missingModules.Count -gt 0) {
     Write-Host "✅ All required modules are functional!" -ForegroundColor Green
 }
 
+# Script-level variables to track module and authentication state
+$script:usePowerShellModules = $false
+$script:directApiToken = $null  
+$script:tokenScope = $null
+
 # Set script-level variable for module availability
 $script:usePowerShellModules = $functionalModules.Count -gt 0
 $script:directApiToken = $null
@@ -422,26 +427,46 @@ try {
     # Method 2: Direct REST API authentication if PowerShell modules fail
     if (!$authSuccess) {
         Write-Host "Attempting direct REST API authentication..." -ForegroundColor Gray
-        try {
-            # Get OAuth token directly
-            $tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
-            $tokenBody = @{
-                client_id = $ClientId
-                client_secret = $ClientSecret
-                scope = "https://service.powerapps.com/.default"
-                grant_type = "client_credentials"
+        
+        # Try multiple token scopes as different APIs require different permissions
+        $tokenScopes = @(
+            "https://service.powerapps.com/.default",
+            "https://graph.microsoft.com/.default", 
+            "https://service.powerplatform.com/.default",
+            "https://admin.services.crm.dynamics.com/.default"
+        )
+        
+        foreach ($scope in $tokenScopes) {
+            try {
+                Write-Host "  Trying scope: $scope" -ForegroundColor Gray
+                
+                # Get OAuth token directly
+                $tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+                $tokenBody = @{
+                    client_id = $ClientId
+                    client_secret = $ClientSecret
+                    scope = $scope
+                    grant_type = "client_credentials"
+                }
+                
+                $tokenResponse = Invoke-RestMethod -Uri $tokenUrl -Method Post -Body $tokenBody -ContentType "application/x-www-form-urlencoded" -ErrorAction Stop
+                
+                if ($tokenResponse.access_token) {
+                    Write-Host "✅ Direct REST API authentication successful with scope: $scope" -ForegroundColor Green
+                    $authSuccess = $true
+                    $script:directApiToken = $tokenResponse.access_token
+                    $script:tokenScope = $scope
+                    break
+                }
             }
-            
-            $tokenResponse = Invoke-RestMethod -Uri $tokenUrl -Method Post -Body $tokenBody -ContentType "application/x-www-form-urlencoded"
-            
-            if ($tokenResponse.access_token) {
-                Write-Host "✅ Direct REST API authentication successful" -ForegroundColor Green
-                $authSuccess = $true
-                $script:directApiToken = $tokenResponse.access_token
+            catch {
+                Write-Host "  ❌ Failed with scope $scope : $($_.Exception.Message)" -ForegroundColor Gray
+                continue
             }
         }
-        catch {
-            Write-Warning "Direct REST API authentication also failed: $($_.Exception.Message)"
+        
+        if (!$authSuccess) {
+            Write-Warning "❌ Direct REST API authentication failed for all scopes"
         }
     }
     
@@ -459,8 +484,11 @@ try {
     # https://orgname.crm.dynamics.com
     # https://orgname.crm4.dynamics.com  
     # https://orgname.api.crm.dynamics.com
+    # https://12345678-1234-1234-1234-123456789012.crm.dynamics.com (GUID format)
     
     $environmentIdentifier = ""
+    $environmentGuid = $null
+    
     try {
         $uri = [System.Uri]$EnvironmentUrl
         $hostName = $uri.Host
@@ -469,6 +497,16 @@ try {
         # Extract org name from different URL patterns
         if ($hostName -match '^([^.]+)\.crm[0-9]*\.dynamics\.com$') {
             $environmentIdentifier = $matches[1]
+            
+            # Check if it's a GUID format (environment ID)
+            $guidPattern = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            if ($environmentIdentifier -match $guidPattern) {
+                $environmentGuid = $environmentIdentifier
+                Write-Host "Detected GUID-based environment ID: $environmentGuid" -ForegroundColor Gray
+            } else {
+                Write-Host "Detected org-name based environment identifier: $environmentIdentifier" -ForegroundColor Gray
+            }
+            
         } elseif ($hostName -match '^([^.]+)\.api\.crm[0-9]*\.dynamics\.com$') {
             $environmentIdentifier = $matches[1]
         } elseif ($hostName -match '^([^.]+)\..*\.dynamics\.com$') {
@@ -517,51 +555,95 @@ try {
     # Method 2: Direct REST API call if PowerShell cmdlets fail
     if (!$environmentDiscoverySuccess) {
         Write-Host "Trying direct REST API for environment discovery..." -ForegroundColor Gray
-        try {
-            # Use the token from either authentication method
-            $apiToken = $null
-            if ($script:directApiToken) {
-                $apiToken = $script:directApiToken
-            } elseif ($script:usePowerShellModules) {
-                $powerAppsAccount = Get-PowerAppsAccount -ErrorAction SilentlyContinue
-                if ($powerAppsAccount -and $powerAppsAccount.AccessToken) {
-                    $apiToken = $powerAppsAccount.AccessToken
-                }
-            }
-            
-            if ($apiToken) {
-                $envHeaders = @{
-                    'Authorization' = "Bearer $apiToken"
-                    'Content-Type' = 'application/json'
-                }
-                
-                # Try multiple environment API endpoints
-                $envEndpoints = @(
-                    "https://api.powerapps.com/providers/Microsoft.PowerApps/environments",
-                    "https://api.powerplatform.com/environments"
-                )
-                
-                foreach ($envEndpoint in $envEndpoints) {
-                    try {
-                        Write-Host "   Trying endpoint: $envEndpoint" -ForegroundColor Gray
-                        $envResponse = Invoke-RestMethod -Uri $envEndpoint -Headers $envHeaders -Method Get -ErrorAction Stop
-                        
-                        if ($envResponse.value) {
-                            $allEnvironments = $envResponse.value
-                            Write-Host "✅ Found $($allEnvironments.Count) environments using REST API" -ForegroundColor Green
-                            $environmentDiscoverySuccess = $true
-                            break
-                        }
-                    }
-                    catch {
-                        Write-Host "   ❌ Failed with endpoint: $envEndpoint" -ForegroundColor Gray
-                        Write-Host "   Error: $($_.Exception.Message)" -ForegroundColor Gray
-                    }
-                }
+        
+        # Use the token from either authentication method
+        $apiToken = $null
+        if ($script:directApiToken) {
+            $apiToken = $script:directApiToken
+        } elseif ($script:usePowerShellModules) {
+            $powerAppsAccount = Get-PowerAppsAccount -ErrorAction SilentlyContinue
+            if ($powerAppsAccount -and $powerAppsAccount.AccessToken) {
+                $apiToken = $powerAppsAccount.AccessToken
             }
         }
-        catch {
-            Write-Warning "REST API environment discovery failed: $($_.Exception.Message)"
+        
+        if ($apiToken) {
+            $envHeaders = @{
+                'Authorization' = "Bearer $apiToken"
+                'Content-Type' = 'application/json'
+                'Accept' = 'application/json'
+            }
+            
+            # Try multiple environment API endpoints with better error handling
+            $envEndpoints = @(
+                @{
+                    Url = "https://api.powerapps.com/providers/Microsoft.PowerApps/environments"
+                    Description = "PowerApps Environments API"
+                },
+                @{
+                    Url = "https://api.powerplatform.com/environments" 
+                    Description = "Power Platform Environments API"
+                },
+                @{
+                    Url = "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments"
+                    Description = "Business App Platform Environments API"
+                },
+                @{
+                    Url = "https://admin.services.crm.dynamics.com/api/v1.0/instances"
+                    Description = "Dynamics Admin API"
+                }
+            )
+            
+            foreach ($endpoint in $envEndpoints) {
+                try {
+                    Write-Host "   Trying: $($endpoint.Description)" -ForegroundColor Gray
+                    Write-Host "     URL: $($endpoint.Url)" -ForegroundColor DarkGray
+                    
+                    $envResponse = Invoke-RestMethod -Uri $endpoint.Url -Headers $envHeaders -Method Get -ErrorAction Stop
+                    
+                    # Handle different response formats
+                    $environments = $null
+                    if ($envResponse.value) {
+                        $environments = $envResponse.value
+                    } elseif ($envResponse -is [array]) {
+                        $environments = $envResponse
+                    } elseif ($envResponse.Items) {
+                        $environments = $envResponse.Items
+                    } else {
+                        $environments = @($envResponse)
+                    }
+                    
+                    if ($environments -and $environments.Count -gt 0) {
+                        $allEnvironments = $environments
+                        Write-Host "✅ Found $($allEnvironments.Count) environments using: $($endpoint.Description)" -ForegroundColor Green
+                        $environmentDiscoverySuccess = $true
+                        break
+                    }
+                }
+                catch {
+                    $statusCode = "Unknown"
+                    $errorMessage = $_.Exception.Message
+                    
+                    # Extract HTTP status code if available
+                    if ($_.Exception.Response) {
+                        $statusCode = [int]$_.Exception.Response.StatusCode
+                    }
+                    
+                    Write-Host "   ❌ Failed: $($endpoint.Description)" -ForegroundColor Yellow
+                    Write-Host "     Status: $statusCode" -ForegroundColor Gray
+                    Write-Host "     Error: $errorMessage" -ForegroundColor Gray
+                    
+                    # Provide specific guidance based on error type
+                    switch ($statusCode) {
+                        401 { Write-Host "     💡 Hint: Authentication issue - check service principal permissions" -ForegroundColor Cyan }
+                        403 { Write-Host "     💡 Hint: Insufficient permissions - service principal may need Power Platform Admin role" -ForegroundColor Cyan }
+                        404 { Write-Host "     💡 Hint: API endpoint not found - this endpoint may not be available" -ForegroundColor Cyan }
+                        429 { Write-Host "     💡 Hint: Rate limited - too many requests" -ForegroundColor Cyan }
+                    }
+                }
+            }
+        } else {
+            Write-Warning "No valid API token available for environment discovery"
         }
     }
     
@@ -617,41 +699,62 @@ try {
         if ($allEnvironments.Count -gt 0) {
             Write-Host "Sample environments (first 3):" -ForegroundColor Gray
             $allEnvironments | Select-Object -First 3 | ForEach-Object {
-                Write-Host "  - $($_.DisplayName) | $($_.EnvironmentName)" -ForegroundColor Gray
+                $envName = $_.DisplayName -or $_.displayName -or $_.name -or "Unknown"
+                $envId = $_.EnvironmentName -or $_.name -or $_.id -or "Unknown"
+                Write-Host "  - $envName | $envId" -ForegroundColor Gray
             }
         }
         
-        # Try multiple matching strategies
-        # Strategy 1: Exact match on environment identifier
+        # Try multiple matching strategies with improved logic
+        # Strategy 1: Exact match on environment identifier (GUID or org name)
         $environment = $allEnvironments | Where-Object { 
-            $_.EnvironmentName -eq $environmentIdentifier -or 
-            $_.DisplayName -eq $environmentIdentifier 
+            ($_.EnvironmentName -eq $environmentIdentifier) -or 
+            ($_.name -eq $environmentIdentifier) -or
+            ($_.id -eq $environmentIdentifier) -or
+            ($_.DisplayName -eq $environmentIdentifier) -or
+            ($_.displayName -eq $environmentIdentifier)
         } | Select-Object -First 1
         
-        if (!$environment) {
-            # Strategy 2: Partial match on environment name
+        if (!$environment -and $environmentGuid) {
+            # Strategy 2: Match GUID-based environment ID
             $environment = $allEnvironments | Where-Object { 
-                $_.EnvironmentName -like "*$environmentIdentifier*" -or 
-                $_.DisplayName -like "*$environmentIdentifier*" 
+                ($_.EnvironmentName -eq $environmentGuid) -or 
+                ($_.name -eq $environmentGuid) -or
+                ($_.id -eq $environmentGuid)
             } | Select-Object -First 1
         }
         
         if (!$environment) {
-            # Strategy 3: Match against the full URL in environment properties
+            # Strategy 3: Partial match on environment name/display name
             $environment = $allEnvironments | Where-Object { 
-                $_.Internal.properties.linkedEnvironmentMetadata.instanceUrl -eq $EnvironmentUrl -or
-                $_.Internal.properties.instanceUrl -eq $EnvironmentUrl
+                ($_.EnvironmentName -like "*$environmentIdentifier*") -or 
+                ($_.DisplayName -like "*$environmentIdentifier*") -or
+                ($_.displayName -like "*$environmentIdentifier*") -or
+                ($_.name -like "*$environmentIdentifier*")
+            } | Select-Object -First 1
+        }
+        
+        if (!$environment) {
+            # Strategy 4: Match against the full URL in environment properties
+            $environment = $allEnvironments | Where-Object { 
+                ($_.Internal.properties.linkedEnvironmentMetadata.instanceUrl -eq $EnvironmentUrl) -or
+                ($_.Internal.properties.instanceUrl -eq $EnvironmentUrl) -or
+                ($_.properties.linkedEnvironmentMetadata.instanceUrl -eq $EnvironmentUrl) -or
+                ($_.properties.instanceUrl -eq $EnvironmentUrl) -or
+                ($_.instanceUrl -eq $EnvironmentUrl)
             } | Select-Object -First 1
         }
         
         if (!$environment) {
             Write-Host "❌ Environment matching failed. Available environments:" -ForegroundColor Red
             $allEnvironments | ForEach-Object {
-                Write-Host "  - Name: $($_.DisplayName)" -ForegroundColor Yellow
-                Write-Host "    ID: $($_.EnvironmentName)" -ForegroundColor Yellow
-                if ($_.Internal.properties.instanceUrl) {
-                    Write-Host "    URL: $($_.Internal.properties.instanceUrl)" -ForegroundColor Yellow
-                }
+                $envName = $_.DisplayName -or $_.displayName -or $_.name -or "Unknown"
+                $envId = $_.EnvironmentName -or $_.name -or $_.id -or "Unknown"
+                $envUrl = $_.Internal.properties.instanceUrl -or $_.properties.instanceUrl -or $_.instanceUrl -or "Unknown"
+                
+                Write-Host "  - Name: $envName" -ForegroundColor Yellow
+                Write-Host "    ID: $envId" -ForegroundColor Yellow
+                Write-Host "    URL: $envUrl" -ForegroundColor Yellow
                 Write-Host "" -ForegroundColor Yellow
             }
             Write-Error "Environment not found for URL: $EnvironmentUrl"
@@ -694,11 +797,24 @@ try {
         'Accept' = 'application/json'
     }
     
-    # Try multiple API endpoints for agents/chatbots
+    # Try multiple API endpoints for agents/chatbots with better error handling
     $agentEndpoints = @(
-        "https://api.powerplatform.com/appmanagement/environments/$($environment.EnvironmentName)/chatbots",
-        "https://api.powerapps.com/providers/Microsoft.PowerApps/environments/$($environment.EnvironmentName)/chatbots",
-        "https://$($environment.EnvironmentName).api.crm.dynamics.com/api/data/v9.2/bots"
+        @{
+            Url = "https://api.powerapps.com/providers/Microsoft.PowerApps/environments/$($environment.EnvironmentName)/chatbots"
+            Description = "PowerApps Chatbots API"
+        },
+        @{
+            Url = "https://api.powerplatform.com/appmanagement/environments/$($environment.EnvironmentName)/chatbots"
+            Description = "Power Platform App Management API"
+        },
+        @{
+            Url = "https://$($environment.EnvironmentName).api.crm.dynamics.com/api/data/v9.2/bots"
+            Description = "Dynamics Web API (Bots)"
+        },
+        @{
+            Url = "https://$($environment.EnvironmentName).api.crm.dynamics.com/api/data/v9.2/workflows?`$filter=category eq 5"
+            Description = "Dynamics Web API (Workflows/Bots)"
+        }
     )
     
     $agents = @()
@@ -706,9 +822,10 @@ try {
     
     foreach ($endpoint in $agentEndpoints) {
         try {
-            Write-Host "Trying endpoint: $endpoint" -ForegroundColor Gray
+            Write-Host "Trying: $($endpoint.Description)" -ForegroundColor Gray
+            Write-Host "  URL: $($endpoint.Url)" -ForegroundColor DarkGray
             
-            $agentsResponse = Invoke-RestMethod -Uri $endpoint -Headers $headers -Method Get -ErrorAction Stop
+            $agentsResponse = Invoke-RestMethod -Uri $endpoint.Url -Headers $headers -Method Get -ErrorAction Stop
             
             # Handle different response formats
             if ($agentsResponse.value) {
@@ -719,13 +836,34 @@ try {
                 $agents = @($agentsResponse)
             }
             
-            Write-Host "✅ Successfully retrieved agents from: $endpoint" -ForegroundColor Green
-            $agentApiSuccess = $true
-            break
+            if ($agents.Count -gt 0) {
+                Write-Host "✅ Successfully retrieved $($agents.Count) agent(s) from: $($endpoint.Description)" -ForegroundColor Green
+                $agentApiSuccess = $true
+                break
+            } else {
+                Write-Host "  ⚠️ No agents found in response from: $($endpoint.Description)" -ForegroundColor Yellow
+            }
             
         } catch {
-            Write-Host "❌ Failed to get agents from: $endpoint" -ForegroundColor Yellow
-            Write-Host "   Error: $($_.Exception.Message)" -ForegroundColor Gray
+            $statusCode = "Unknown"
+            $errorMessage = $_.Exception.Message
+            
+            # Extract HTTP status code if available
+            if ($_.Exception.Response) {
+                $statusCode = [int]$_.Exception.Response.StatusCode
+            }
+            
+            Write-Host "  ❌ Failed: $($endpoint.Description)" -ForegroundColor Yellow
+            Write-Host "    Status: $statusCode" -ForegroundColor Gray
+            Write-Host "    Error: $errorMessage" -ForegroundColor Gray
+            
+            # Provide specific guidance based on error type
+            switch ($statusCode) {
+                401 { Write-Host "    💡 Hint: Authentication issue - token may be invalid for this API" -ForegroundColor Cyan }
+                403 { Write-Host "    💡 Hint: Insufficient permissions for this environment" -ForegroundColor Cyan }
+                404 { Write-Host "    💡 Hint: Environment or API endpoint not found" -ForegroundColor Cyan }
+                429 { Write-Host "    💡 Hint: Rate limited - too many requests" -ForegroundColor Cyan }
+            }
             continue
         }
     }

@@ -1,5 +1,5 @@
-# Import Power Platform Solution
-# This script imports a solution to a Power Platform environment
+# Import Power Platform Managed Solution
+# This script imports a managed solution to a Power Platform environment
 
 param(
     [Parameter(Mandatory=$true)]
@@ -25,9 +25,6 @@ param(
     
     [Parameter(Mandatory=$false)]
     [bool]$SkipProductUpdateDependencies = $false,
-    
-    [Parameter(Mandatory=$false)]
-    [bool]$ConvertToManaged = $false,
     
     [Parameter(Mandatory=$false)]
     [int]$MaxAsyncWaitTime = 60
@@ -77,10 +74,7 @@ try {
         Write-Host "Will skip product update dependencies..." -ForegroundColor Yellow
     }
     
-    if ($ConvertToManaged) {
-        $importCommand += " --convert-to-managed"
-        Write-Host "Will convert to managed solution..." -ForegroundColor Yellow
-    }
+    Write-Host "Importing managed solution to production environment..." -ForegroundColor Yellow
     
     Write-Host "Executing import command..." -ForegroundColor Cyan
     Write-Host $importCommand -ForegroundColor Gray

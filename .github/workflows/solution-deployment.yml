@@ -1,19 +1,6 @@
-# SETUP REQUIRED:
-# ===============
-# Repository Secrets (Settings > Secrets and variables > Actions):
-# - DEV_ENVIRONMENT_URL: Your development environment URL (e.g., https://yourorg-dev.crm.dynamics.com)
-# - PROD_ENVIRONMENT_URL: Your production environment URL (e.g., https://yourorg.crm.dynamics.com)
-# - POWER_PLATFORM_SP_APP_ID: Service principal Application (client) ID
-# - POWER_PLATFORM_SP_CLIENT_SECRET: Service principal client secret
-# - POWER_PLATFORM_TENANT_ID: Azure AD tenant ID
-#
-# Service Principal Setup:
-# 1. Run: az ad sp create-for-rbac --name "GitHubActions-PowerPlatform" --role contributor
-# 2. In Azure AD, assign "Power Platform Administrator" role
-# 3. Grant API permissions for Power Platform services
-#
-# This workflow deploys managed solutions to production without post-deployment agent configuration.
-# Agents and other components included in the solution will be deployed but not automatically configured.
+# Power Platform Managed Solution Deployment
+# This workflow exports from dev, builds a managed solution, and deploys to production
+# No post-deployment agent configuration is performed
 
 name: Power Platform Managed Solution Deployment
 
@@ -32,6 +19,13 @@ on:
         options:
         - production
         - test
+
+# Repository Secrets Required:
+# - DEV_ENVIRONMENT_URL: Development environment URL (e.g., https://yourorg-dev.crm.dynamics.com)
+# - PROD_ENVIRONMENT_URL: Production environment URL (e.g., https://yourorg.crm.dynamics.com)
+# - POWER_PLATFORM_SP_APP_ID: Service principal Application (client) ID
+# - POWER_PLATFORM_SP_CLIENT_SECRET: Service principal client secret
+# - POWER_PLATFORM_TENANT_ID: Azure AD tenant ID
 
 env:
   SOLUTION_NAME: 'TestAutomationSolution'  # Replace with your actual solution name
@@ -53,7 +47,7 @@ jobs:
     - name: Setup Power Platform CLI
       uses: microsoft/powerplatform-actions/actions-install@v1
 
-    - name: Export solution
+    - name: Export solution from development
       uses: microsoft/powerplatform-actions/export-solution@v1
       with:
         environment-url: ${{ secrets.DEV_ENVIRONMENT_URL }}
@@ -102,30 +96,24 @@ jobs:
     - name: Setup Power Platform CLI
       uses: microsoft/powerplatform-actions/actions-install@v1
 
-    - name: Debug exported solution
+    - name: Verify exported solution
+      shell: pwsh
       run: |
-        Write-Host "=== Debugging Exported Solution ==="
-        Write-Host "Current directory: $(Get-Location)"
+        Write-Host "=== Verifying Exported Solution ==="
         Write-Host "SOLUTION_EXPORTED_FOLDER: ${{ env.SOLUTION_EXPORTED_FOLDER }}"
         Write-Host "SOLUTION_NAME: ${{ env.SOLUTION_NAME }}"
         
-        if (Test-Path "${{ env.SOLUTION_EXPORTED_FOLDER }}") {
-          Write-Host "Contents of SOLUTION_EXPORTED_FOLDER:"
-          Get-ChildItem "${{ env.SOLUTION_EXPORTED_FOLDER }}" | Select-Object Name, Length
-        } else {
-          Write-Host "SOLUTION_EXPORTED_FOLDER does not exist!"
-        }
-        
         $exportedSolutionPath = "${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}.zip"
         if (Test-Path $exportedSolutionPath) {
-          Write-Host "Found exported solution: $exportedSolutionPath"
-          Write-Host "File size: $((Get-Item $exportedSolutionPath).Length) bytes"
+          Write-Host "✅ Found exported solution: $exportedSolutionPath"
+          Write-Host "   File size: $((Get-Item $exportedSolutionPath).Length) bytes"
         } else {
-          Write-Host "Exported solution not found at: $exportedSolutionPath"
+          Write-Error "❌ Exported solution not found at: $exportedSolutionPath"
+          exit 1
         }
-      shell: pwsh
 
-    - name: Convert to managed solution using CLI
+    - name: Convert to managed solution
+      shell: pwsh
       run: |
         Write-Host "=== Converting Solution to Managed ==="
         $exportedSolutionPath = "${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}.zip"
@@ -133,45 +121,26 @@ jobs:
         $tempUnpackFolder = "temp_unpack"
         
         try {
-          if (Test-Path $exportedSolutionPath) {
-            Write-Host "Converting $exportedSolutionPath to managed..."
-            
-            # First unpack the solution
-            Write-Host "Step 1: Unpacking solution..."
-            pac solution unpack --zipfile $exportedSolutionPath --folder $tempUnpackFolder --packagetype Unmanaged
-            
-            # Then pack as managed
-            Write-Host "Step 2: Packing as managed solution..."
-            pac solution pack --zipfile $managedSolutionPath --folder $tempUnpackFolder --packagetype Managed
-            
-            if (Test-Path $managedSolutionPath) {
-              Write-Host "✅ Managed solution created successfully: $managedSolutionPath"
-              Write-Host "File size: $((Get-Item $managedSolutionPath).Length) bytes"
-            } else {
-              throw "Failed to create managed solution"
-            }
+          Write-Host "Converting $exportedSolutionPath to managed..."
+          
+          # Unpack the unmanaged solution
+          Write-Host "Step 1: Unpacking unmanaged solution..."
+          pac solution unpack --zipfile $exportedSolutionPath --folder $tempUnpackFolder --packagetype Unmanaged
+          
+          # Pack as managed solution
+          Write-Host "Step 2: Packing as managed solution..."
+          pac solution pack --zipfile $managedSolutionPath --folder $tempUnpackFolder --packagetype Managed
+          
+          if (Test-Path $managedSolutionPath) {
+            Write-Host "✅ Managed solution created successfully: $managedSolutionPath"
+            Write-Host "   File size: $((Get-Item $managedSolutionPath).Length) bytes"
           } else {
-            throw "Source solution not found: $exportedSolutionPath"
+            throw "Failed to create managed solution"
           }
         }
         catch {
-          Write-Host "❌ Error during solution conversion: $_"
-          Write-Host "Attempting alternative method using PowerPlatform actions..."
-          
-          # Clean up temp folder if it exists
-          if (Test-Path $tempUnpackFolder) {
-            Remove-Item $tempUnpackFolder -Recurse -Force
-          }
-          
-          # Alternative: Try direct copy and rename (for testing)
-          if (Test-Path $exportedSolutionPath) {
-            Write-Host "Using exported solution as managed (fallback method)..."
-            Copy-Item $exportedSolutionPath $managedSolutionPath
-            Write-Host "✅ Fallback: Copied solution as managed"
-          } else {
-            Write-Host "❌ Critical error: No solution file available"
-            exit 1
-          }
+          Write-Error "❌ Error during solution conversion: $_"
+          exit 1
         }
         finally {
           # Clean up temp folder
@@ -180,7 +149,6 @@ jobs:
             Write-Host "Cleaned up temporary folder"
           }
         }
-      shell: pwsh
 
     - name: Upload managed solution as artifact
       uses: actions/upload-artifact@v4
@@ -208,7 +176,22 @@ jobs:
     - name: Setup Power Platform CLI
       uses: microsoft/powerplatform-actions/actions-install@v1
 
-    - name: Import solution to Production
+    - name: Verify managed solution before deployment
+      shell: pwsh
+      run: |
+        Write-Host "=== Pre-Deployment Verification ===" -ForegroundColor Cyan
+        $managedSolutionPath = "${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip"
+        
+        if (Test-Path $managedSolutionPath) {
+          Write-Host "✅ Managed solution found: $managedSolutionPath" -ForegroundColor Green
+          Write-Host "   File size: $((Get-Item $managedSolutionPath).Length) bytes" -ForegroundColor Gray
+          Write-Host "   Target environment: ${{ secrets.PROD_ENVIRONMENT_URL }}" -ForegroundColor Gray
+        } else {
+          Write-Error "❌ Managed solution not found at: $managedSolutionPath"
+          exit 1
+        }
+
+    - name: Deploy managed solution to Production
       uses: microsoft/powerplatform-actions/import-solution@v1
       with:
         environment-url: ${{ secrets.PROD_ENVIRONMENT_URL }}
@@ -220,15 +203,22 @@ jobs:
         publish-changes: true
         skip-dependency-check: false
 
-    - name: Verify deployment success
+    - name: Deployment success notification
       shell: pwsh
       run: |
-        Write-Host "✅ Managed solution deployed successfully to production!" -ForegroundColor Green
-        Write-Host "🎯 Deployment Summary:" -ForegroundColor Cyan
-        Write-Host "   Solution: ${{ env.SOLUTION_NAME }}" -ForegroundColor White
-        Write-Host "   Environment: ${{ secrets.PROD_ENVIRONMENT_URL }}" -ForegroundColor White
-        Write-Host "   Type: Managed Solution" -ForegroundColor White
-        Write-Host "   Status: ✅ Completed" -ForegroundColor Green
+        Write-Host "🎉 ===== DEPLOYMENT COMPLETED SUCCESSFULLY ===== 🎉" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "📋 Deployment Summary:" -ForegroundColor Cyan
+        Write-Host "   Solution Name: ${{ env.SOLUTION_NAME }}" -ForegroundColor White
+        Write-Host "   Solution Type: Managed Solution" -ForegroundColor White
+        Write-Host "   Target Environment: ${{ secrets.PROD_ENVIRONMENT_URL }}" -ForegroundColor White
+        Write-Host "   Deployment Status: ✅ Success" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "🔗 Next Steps:" -ForegroundColor Cyan
+        Write-Host "   1. Verify solution components in the production environment" -ForegroundColor Yellow
+        Write-Host "   2. Test functionality to ensure everything works as expected" -ForegroundColor Yellow
+        Write-Host "   3. Configure any manual post-deployment settings if needed" -ForegroundColor Yellow
+        Write-Host "   4. Update documentation with deployment details" -ForegroundColor Yellow
 
   run-solution-checker:
     needs: [ export-from-dev ]

@@ -1,7 +1,6 @@
-# Alternative Azure DevOps Pipeline for Power Platform Deployment
-# This pipeline uses PowerShell tasks with the Power Platform CLI
-# Note: You'll need to install the Microsoft Power Platform Build Tools extension
-# from the Azure DevOps Marketplace for full functionality
+# Azure DevOps Pipeline for Power Platform Managed Solution Deployment
+# This pipeline exports solutions from dev, builds managed solutions, and deploys to production
+# No post-deployment agent configuration is performed - agents are deployed as part of the solution
 
 trigger:
   branches:

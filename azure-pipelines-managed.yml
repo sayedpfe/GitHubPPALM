@@ -1,0 +1,349 @@
+# Azure DevOps Pipeline for Power Platform Managed Solution Deployment
+# This pipeline exports solutions from dev, builds managed solutions, and deploys to production
+# Uses PowerShell tasks with Power Platform CLI for maximum compatibility
+
+trigger:
+  branches:
+    include:
+    - main
+  paths:
+    exclude:
+    - README.md
+    - docs/*
+    - '*.md'
+
+pr:
+  branches:
+    include:
+    - main
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  SOLUTION_NAME: 'TestAutomationSolution'  # Replace with your actual solution name
+  SOLUTION_EXPORTED_FOLDER: '$(Pipeline.Workspace)/out/exported'
+  SOLUTION_FOLDER: '$(Pipeline.Workspace)/out/solutions'
+
+stages:
+- stage: Export
+  displayName: 'Export from Development'
+  jobs:
+  - job: ExportSolution
+    displayName: 'Export Solution from Dev Environment'
+    steps:
+    - task: PowerShell@2
+      displayName: 'Install Power Platform CLI'
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "Installing Power Platform CLI..." -ForegroundColor Cyan
+          
+          # Download and install PAC CLI
+          $pacInstallerUrl = "https://aka.ms/PowerPlatformCLI"
+          $installerPath = "$(Agent.TempDirectory)/powerapps-cli.msi"
+          
+          Write-Host "Downloading from: $pacInstallerUrl" -ForegroundColor Gray
+          Invoke-WebRequest -Uri $pacInstallerUrl -OutFile $installerPath
+          
+          Write-Host "Installing Power Platform CLI..." -ForegroundColor Gray
+          Start-Process msiexec.exe -ArgumentList "/i $installerPath /quiet /qn" -Wait
+          
+          # Add to PATH for this session
+          $env:PATH += ";C:\Program Files\Microsoft Power Platform CLI"
+          Write-Host "##vso[task.setvariable variable=PATH]$env:PATH"
+          
+          # Verify installation
+          Write-Host "Verifying PAC CLI installation..." -ForegroundColor Gray
+          pac --version
+
+    - task: PowerShell@2
+      displayName: 'Export Solution from Development'
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "=== Exporting Solution from Development ===" -ForegroundColor Cyan
+          
+          # Create output directory
+          if (-not (Test-Path "$(SOLUTION_EXPORTED_FOLDER)")) {
+            New-Item -Path "$(SOLUTION_EXPORTED_FOLDER)" -ItemType Directory -Force
+            Write-Host "Created output directory: $(SOLUTION_EXPORTED_FOLDER)" -ForegroundColor Gray
+          }
+          
+          try {
+            # Authenticate to Power Platform
+            Write-Host "Authenticating to development environment..." -ForegroundColor Yellow
+            pac auth create --name "DevAuth" --kind "ServicePrincipal" --url "$(DEV_ENVIRONMENT_URL)" --applicationId "$(POWER_PLATFORM_SP_APP_ID)" --clientSecret "$(POWER_PLATFORM_SP_CLIENT_SECRET)" --tenant "$(POWER_PLATFORM_TENANT_ID)"
+            pac auth select --name "DevAuth"
+            
+            # Export solution
+            Write-Host "Exporting solution: $(SOLUTION_NAME)" -ForegroundColor Yellow
+            $exportPath = "$(SOLUTION_EXPORTED_FOLDER)/$(SOLUTION_NAME).zip"
+            pac solution export --name "$(SOLUTION_NAME)" --path $exportPath --managed false --async
+            
+            if (Test-Path $exportPath) {
+              Write-Host "✅ Solution exported successfully: $exportPath" -ForegroundColor Green
+              Write-Host "File size: $((Get-Item $exportPath).Length) bytes" -ForegroundColor Gray
+            } else {
+              throw "Solution export failed - file not found: $exportPath"
+            }
+          }
+          catch {
+            Write-Error "❌ Export failed: $($_.Exception.Message)"
+            exit 1
+          }
+          finally {
+            # Clean up auth
+            pac auth delete --name "DevAuth" -ErrorAction SilentlyContinue
+          }
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Exported Solution Artifact'
+      inputs:
+        targetPath: '$(SOLUTION_EXPORTED_FOLDER)'
+        artifactName: 'exported-solution'
+
+- stage: BuildManaged
+  displayName: 'Build Managed Solution'
+  dependsOn: Export
+  jobs:
+  - job: BuildSolution
+    displayName: 'Convert to Managed Solution'
+    steps:
+    - task: PowerShell@2
+      displayName: 'Install Power Platform CLI'
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "Installing Power Platform CLI..." -ForegroundColor Cyan
+          
+          # Download and install PAC CLI
+          $pacInstallerUrl = "https://aka.ms/PowerPlatformCLI"
+          $installerPath = "$(Agent.TempDirectory)/powerapps-cli.msi"
+          
+          Invoke-WebRequest -Uri $pacInstallerUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i $installerPath /quiet /qn" -Wait
+          
+          # Add to PATH
+          $env:PATH += ";C:\Program Files\Microsoft Power Platform CLI"
+          Write-Host "##vso[task.setvariable variable=PATH]$env:PATH"
+          
+          pac --version
+
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download Exported Solution'
+      inputs:
+        artifactName: 'exported-solution'
+        targetPath: '$(SOLUTION_EXPORTED_FOLDER)'
+
+    - task: PowerShell@2
+      displayName: 'Convert to Managed Solution'
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "=== Converting to Managed Solution ===" -ForegroundColor Cyan
+          
+          $exportedSolutionPath = "$(SOLUTION_EXPORTED_FOLDER)/$(SOLUTION_NAME).zip"
+          $managedSolutionPath = "$(SOLUTION_EXPORTED_FOLDER)/$(SOLUTION_NAME)_managed.zip"
+          $tempUnpackFolder = "$(Agent.TempDirectory)/temp_unpack"
+          
+          try {
+            if (Test-Path $exportedSolutionPath) {
+              Write-Host "Found exported solution: $exportedSolutionPath" -ForegroundColor Gray
+              Write-Host "Converting to managed solution..." -ForegroundColor Yellow
+              
+              # Unpack the unmanaged solution
+              Write-Host "Step 1: Unpacking unmanaged solution..." -ForegroundColor Gray
+              pac solution unpack --zipfile $exportedSolutionPath --folder $tempUnpackFolder --packagetype Unmanaged
+              
+              # Pack as managed solution
+              Write-Host "Step 2: Packing as managed solution..." -ForegroundColor Gray
+              pac solution pack --zipfile $managedSolutionPath --folder $tempUnpackFolder --packagetype Managed
+              
+              if (Test-Path $managedSolutionPath) {
+                Write-Host "✅ Managed solution created successfully: $managedSolutionPath" -ForegroundColor Green
+                Write-Host "File size: $((Get-Item $managedSolutionPath).Length) bytes" -ForegroundColor Gray
+              } else {
+                throw "Failed to create managed solution"
+              }
+            } else {
+              throw "Exported solution not found: $exportedSolutionPath"
+            }
+          }
+          catch {
+            Write-Error "❌ Error during solution conversion: $_"
+            exit 1
+          }
+          finally {
+            # Clean up temp folder
+            if (Test-Path $tempUnpackFolder) {
+              Remove-Item $tempUnpackFolder -Recurse -Force
+              Write-Host "Cleaned up temporary folder" -ForegroundColor Gray
+            }
+          }
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Managed Solution Artifact'
+      inputs:
+        targetPath: '$(SOLUTION_EXPORTED_FOLDER)/$(SOLUTION_NAME)_managed.zip'
+        artifactName: 'managed-solution'
+
+- stage: Deploy
+  displayName: 'Deploy to Production'
+  dependsOn: BuildManaged
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: DeployToProduction
+    displayName: 'Deploy Managed Solution to Production'
+    environment: 'Production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: PowerShell@2
+            displayName: 'Install Power Platform CLI'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "Installing Power Platform CLI..." -ForegroundColor Cyan
+                
+                # Download and install PAC CLI
+                $pacInstallerUrl = "https://aka.ms/PowerPlatformCLI"
+                $installerPath = "$(Agent.TempDirectory)/powerapps-cli.msi"
+                
+                Invoke-WebRequest -Uri $pacInstallerUrl -OutFile $installerPath
+                Start-Process msiexec.exe -ArgumentList "/i $installerPath /quiet /qn" -Wait
+                
+                # Add to PATH
+                $env:PATH += ";C:\Program Files\Microsoft Power Platform CLI"
+                Write-Host "##vso[task.setvariable variable=PATH]$env:PATH"
+                
+                pac --version
+
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Managed Solution'
+            inputs:
+              artifactName: 'managed-solution'
+              targetPath: '$(Pipeline.Workspace)'
+
+          - task: PowerShell@2
+            displayName: 'Deploy Managed Solution to Production'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "=== Deploying Managed Solution to Production ===" -ForegroundColor Cyan
+                
+                $managedSolutionPath = "$(Pipeline.Workspace)/$(SOLUTION_NAME)_managed.zip"
+                
+                # Verify managed solution exists
+                if (Test-Path $managedSolutionPath) {
+                  Write-Host "✅ Managed solution found: $managedSolutionPath" -ForegroundColor Green
+                  Write-Host "File size: $((Get-Item $managedSolutionPath).Length) bytes" -ForegroundColor Gray
+                } else {
+                  Write-Error "❌ Managed solution not found: $managedSolutionPath"
+                  exit 1
+                }
+                
+                try {
+                  # Authenticate to production environment
+                  Write-Host "Authenticating to production environment..." -ForegroundColor Yellow
+                  pac auth create --name "ProdAuth" --kind "ServicePrincipal" --url "$(PROD_ENVIRONMENT_URL)" --applicationId "$(POWER_PLATFORM_SP_APP_ID)" --clientSecret "$(POWER_PLATFORM_SP_CLIENT_SECRET)" --tenant "$(POWER_PLATFORM_TENANT_ID)"
+                  pac auth select --name "ProdAuth"
+                  
+                  # Import managed solution
+                  Write-Host "Importing managed solution to production..." -ForegroundColor Yellow
+                  pac solution import --path $managedSolutionPath --force-overwrite --publish-changes --async --max-async-wait-time 60
+                  
+                  Write-Host "✅ Managed solution deployed successfully to production!" -ForegroundColor Green
+                }
+                catch {
+                  Write-Error "❌ Deployment failed: $($_.Exception.Message)"
+                  exit 1
+                }
+                finally {
+                  # Clean up auth
+                  pac auth delete --name "ProdAuth" -ErrorAction SilentlyContinue
+                }
+
+          - task: PowerShell@2
+            displayName: 'Post-Deployment Summary'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "🎉 ===== MANAGED SOLUTION DEPLOYED SUCCESSFULLY ===== 🎉" -ForegroundColor Green
+                Write-Host ""
+                Write-Host "📋 Deployment Summary:" -ForegroundColor Cyan
+                Write-Host "   Solution Name: $(SOLUTION_NAME)" -ForegroundColor White
+                Write-Host "   Solution Type: Managed Solution" -ForegroundColor White
+                Write-Host "   Target Environment: Production" -ForegroundColor White
+                Write-Host "   Environment URL: $(PROD_ENVIRONMENT_URL)" -ForegroundColor White
+                Write-Host "   Deployment Status: ✅ Success" -ForegroundColor Green
+                Write-Host ""
+                Write-Host "📝 Important Notes:" -ForegroundColor Yellow
+                Write-Host "   • Solution has been deployed as a managed solution" -ForegroundColor White
+                Write-Host "   • Copilot Studio agents are included but not automatically configured" -ForegroundColor White
+                Write-Host "   • Manual configuration may be required for agent channels and sharing" -ForegroundColor White
+                Write-Host ""
+                Write-Host "🔗 Next Steps:" -ForegroundColor Cyan
+                Write-Host "   1. Verify solution components in production" -ForegroundColor Gray
+                Write-Host "   2. Test all functionality" -ForegroundColor Gray
+                Write-Host "   3. Configure manual post-deployment settings if needed" -ForegroundColor Gray
+
+- stage: SolutionChecker
+  displayName: 'Run Solution Checker'
+  dependsOn: Export
+  jobs:
+  - job: RunSolutionChecker
+    displayName: 'Analyze Solution Quality'
+    steps:
+    - task: PowerShell@2
+      displayName: 'Install Power Platform CLI'
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "Installing Power Platform CLI..." -ForegroundColor Cyan
+          
+          $pacInstallerUrl = "https://aka.ms/PowerPlatformCLI"
+          $installerPath = "$(Agent.TempDirectory)/powerapps-cli.msi"
+          
+          Invoke-WebRequest -Uri $pacInstallerUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i $installerPath /quiet /qn" -Wait
+          
+          $env:PATH += ";C:\Program Files\Microsoft Power Platform CLI"
+          Write-Host "##vso[task.setvariable variable=PATH]$env:PATH"
+          
+          pac --version
+
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download Exported Solution'
+      inputs:
+        artifactName: 'exported-solution'
+        targetPath: '$(SOLUTION_EXPORTED_FOLDER)'
+
+    - task: PowerShell@2
+      displayName: 'Run Solution Checker'
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "=== Running Solution Checker ===" -ForegroundColor Cyan
+          
+          $solutionPath = "$(SOLUTION_EXPORTED_FOLDER)/$(SOLUTION_NAME).zip"
+          
+          try {
+            # Authenticate
+            pac auth create --name "CheckerAuth" --kind "ServicePrincipal" --url "$(DEV_ENVIRONMENT_URL)" --applicationId "$(POWER_PLATFORM_SP_APP_ID)" --clientSecret "$(POWER_PLATFORM_SP_CLIENT_SECRET)" --tenant "$(POWER_PLATFORM_TENANT_ID)"
+            pac auth select --name "CheckerAuth"
+            
+            # Run solution checker
+            Write-Host "Running solution checker on: $solutionPath" -ForegroundColor Yellow
+            pac solution check --path $solutionPath
+            
+            Write-Host "✅ Solution checker completed" -ForegroundColor Green
+          }
+          catch {
+            Write-Warning "⚠️ Solution checker failed: $($_.Exception.Message)"
+            # Don't fail the pipeline for solution checker issues
+          }
+          finally {
+            pac auth delete --name "CheckerAuth" -ErrorAction SilentlyContinue
+          }

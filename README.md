@@ -1,8 +1,8 @@
-# Power Platform Automated Deployment
+# Power Platform Managed Solution Deployment
 
-🚀 **STATUS: PRODUCTION READY** ✅ | 📅 Updated: Dec 19, 2024 | [View Detailed Status](./DEPLOYMENT-STATUS.md)
+🚀 **STATUS: PRODUCTION READY** ✅ | 📅 Updated: Dec 29, 2024 | [View Detailed Status](./DEPLOYMENT-STATUS.md)
 
-This repository contains a complete automated deployment solution for Power Platform solutions and Copilot Studio agents from development to production environments.
+This repository contains an automated deployment solution for deploying Power Platform solutions as managed solutions to production environments.
 
 ## 🎯 Quick Start
 
@@ -10,20 +10,22 @@ This repository contains a complete automated deployment solution for Power Plat
 2. **Run setup script**: `.\scripts\test-setup.ps1`
 3. **Create service principal**: `.\scripts\setup-service-principal.ps1`
 4. **Configure GitHub secrets** (see [Setup Guide](./SETUP-GUIDE.md))
-5. **Push to main** to trigger deployment
+5. **Push to main** to trigger managed solution deployment
 
 ## ✨ Features
 
-- ✅ **Complete CI/CD Pipeline** for Power Platform solutions
-- ✅ **Copilot Studio Agent Deployment** with channel configuration
-- ✅ **Multi-Environment Support** (dev → test → production)
+- ✅ **Managed Solution Deployment** to production
+- ✅ **Multi-Environment Support** (dev → production)
 - ✅ **Service Principal Authentication** for secure automation
 - ✅ **GitHub Actions & Azure DevOps** pipeline support
+- ✅ **Solution Checker Integration** for quality validation
 - ✅ **Local Development Tools** for testing and validation
 
 ## Overview
 
-This solution uses GitHub Actions (or Azure DevOps) to automate the deployment of Power Platform solutions across environments using Application Lifecycle Management (ALM) best practices.
+This solution uses GitHub Actions (or Azure DevOps) to automate the deployment of Power Platform solutions as managed solutions to production using Application Lifecycle Management (ALM) best practices.
+
+**Important**: This deployment process focuses on deploying managed solutions only. Copilot Studio agents included in your solution will be deployed but will NOT be automatically configured for channels or sharing. Manual configuration may be required after deployment.
 
 ## Prerequisites
 
