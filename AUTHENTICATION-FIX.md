@@ -48,7 +48,25 @@ I've updated the GitHub Actions workflow to use the official Microsoft PowerPlat
     solution-name: ${{ env.SOLUTION_NAME }}
 ```
 
-**2. CLI Verification Command Fixed:**
+**3. Solution Packaging Error Fixed:**
+
+**Before (causing "Solution package type did not match" error):**
+```yaml
+- name: Pack managed solution
+  uses: microsoft/powerplatform-actions/pack-solution@v1
+  with:
+    solution-type: 'Managed'
+    # Sometimes failed to convert unmanaged to managed
+```
+
+**After (fixed):**
+```yaml
+- name: Pack managed solution
+  run: |
+    pac solution pack --zipfile "solution_managed.zip" --folder "solution_folder" --packagetype Managed --allowDelete
+```
+
+**4. CLI Verification Command Fixed:**
 
 **Before (causing "Not a valid command" error):**
 ```yaml

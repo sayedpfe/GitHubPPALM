@@ -79,18 +79,79 @@ jobs:
     - name: Download exported solution artifact
       uses: actions/download-artifact@v4
       with:
+        name: exportedsolution
+        path: ${{ env.SOLUTION_EXPORTED_FOLDER }}
+
+    - name: Download unpacked solution artifact
+      uses: actions/download-artifact@v4
+      with:
         name: unpackedsolution
         path: ${{ env.SOLUTION_FOLDER }}
 
     - name: Setup Power Platform CLI
       uses: microsoft/powerplatform-actions/actions-install@v1
 
+    - name: Debug solution structure
+      run: |
+        Write-Host "=== Debugging Solution Structure ==="
+        Write-Host "Current directory: $(Get-Location)"
+        Write-Host "SOLUTION_FOLDER: ${{ env.SOLUTION_FOLDER }}"
+        Write-Host "SOLUTION_NAME: ${{ env.SOLUTION_NAME }}"
+        Write-Host "Expected solution path: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}"
+        
+        if (Test-Path "${{ env.SOLUTION_FOLDER }}") {
+          Write-Host "Contents of SOLUTION_FOLDER:"
+          Get-ChildItem "${{ env.SOLUTION_FOLDER }}" -Recurse | Select-Object FullName
+        } else {
+          Write-Host "SOLUTION_FOLDER does not exist!"
+        }
+        
+        if (Test-Path "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}") {
+          Write-Host "Contents of solution folder:"
+          Get-ChildItem "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}" | Select-Object Name
+        } else {
+          Write-Host "Solution folder does not exist!"
+        }
+      shell: pwsh
+
     - name: Pack managed solution
-      uses: microsoft/powerplatform-actions/pack-solution@v1
-      with:
-        solution-folder: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}
-        solution-file: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
-        solution-type: 'Managed'
+      run: |
+        # Ensure solution folder exists
+        if (-not (Test-Path "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}")) {
+          Write-Error "Solution folder not found: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}"
+          exit 1
+        }
+        
+        # Check for Solution.xml file
+        $solutionXmlPath = "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}/Other/Solution.xml"
+        if (Test-Path $solutionXmlPath) {
+          Write-Host "Found Solution.xml at: $solutionXmlPath"
+          # Read and display solution info
+          [xml]$solutionXml = Get-Content $solutionXmlPath
+          Write-Host "Solution Unique Name: $($solutionXml.ImportExportXml.SolutionManifest.UniqueName)"
+          Write-Host "Solution Type: $($solutionXml.ImportExportXml.SolutionManifest.Managed)"
+        }
+        
+        # Create output directory if it doesn't exist
+        $outputDir = Split-Path "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip" -Parent
+        if (-not (Test-Path $outputDir)) {
+          New-Item -ItemType Directory -Path $outputDir -Force
+        }
+        
+        # Pack as managed solution using pac CLI
+        Write-Host "Packing solution as managed..."
+        pac solution pack --zipfile "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip" --folder "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}" --packagetype Managed --allowDelete
+        
+        # Verify the managed solution was created
+        if (Test-Path "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip") {
+          Write-Host "✅ Managed solution created successfully!"
+          $fileSize = (Get-Item "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip").Length
+          Write-Host "File size: $($fileSize) bytes"
+        } else {
+          Write-Error "❌ Failed to create managed solution!"
+          exit 1
+        }
+      shell: pwsh
 
     - name: Upload managed solution as artifact
       uses: actions/upload-artifact@v4
