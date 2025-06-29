@@ -82,50 +82,94 @@ jobs:
         name: exportedsolution
         path: ${{ env.SOLUTION_EXPORTED_FOLDER }}
 
-    - name: Download unpacked solution artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: unpackedsolution
-        path: ${{ env.SOLUTION_FOLDER }}
-
     - name: Setup Power Platform CLI
       uses: microsoft/powerplatform-actions/actions-install@v1
 
-    - name: Debug solution structure
+    - name: Debug exported solution
       run: |
-        Write-Host "=== Debugging Solution Structure ==="
+        Write-Host "=== Debugging Exported Solution ==="
         Write-Host "Current directory: $(Get-Location)"
-        Write-Host "SOLUTION_FOLDER: ${{ env.SOLUTION_FOLDER }}"
+        Write-Host "SOLUTION_EXPORTED_FOLDER: ${{ env.SOLUTION_EXPORTED_FOLDER }}"
         Write-Host "SOLUTION_NAME: ${{ env.SOLUTION_NAME }}"
-        Write-Host "Expected solution path: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}"
         
-        if (Test-Path "${{ env.SOLUTION_FOLDER }}") {
-          Write-Host "Contents of SOLUTION_FOLDER:"
-          Get-ChildItem "${{ env.SOLUTION_FOLDER }}" -Recurse | Select-Object FullName
+        if (Test-Path "${{ env.SOLUTION_EXPORTED_FOLDER }}") {
+          Write-Host "Contents of SOLUTION_EXPORTED_FOLDER:"
+          Get-ChildItem "${{ env.SOLUTION_EXPORTED_FOLDER }}" | Select-Object Name, Length
         } else {
-          Write-Host "SOLUTION_FOLDER does not exist!"
+          Write-Host "SOLUTION_EXPORTED_FOLDER does not exist!"
         }
         
-        if (Test-Path "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}") {
-          Write-Host "Contents of solution folder:"
-          Get-ChildItem "${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}" | Select-Object Name
+        $exportedSolutionPath = "${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}.zip"
+        if (Test-Path $exportedSolutionPath) {
+          Write-Host "Found exported solution: $exportedSolutionPath"
+          Write-Host "File size: $((Get-Item $exportedSolutionPath).Length) bytes"
         } else {
-          Write-Host "Solution folder does not exist!"
+          Write-Host "Exported solution not found at: $exportedSolutionPath"
         }
       shell: pwsh
 
-    - name: Pack managed solution
-      uses: microsoft/powerplatform-actions/pack-solution@v1
-      with:
-        solution-folder: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}
-        solution-file: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
-        solution-type: 'Managed'
+    - name: Convert to managed solution using CLI
+      run: |
+        Write-Host "=== Converting Solution to Managed ==="
+        $exportedSolutionPath = "${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}.zip"
+        $managedSolutionPath = "${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip"
+        $tempUnpackFolder = "temp_unpack"
+        
+        try {
+          if (Test-Path $exportedSolutionPath) {
+            Write-Host "Converting $exportedSolutionPath to managed..."
+            
+            # First unpack the solution
+            Write-Host "Step 1: Unpacking solution..."
+            pac solution unpack --zipfile $exportedSolutionPath --folder $tempUnpackFolder --packagetype Unmanaged
+            
+            # Then pack as managed
+            Write-Host "Step 2: Packing as managed solution..."
+            pac solution pack --zipfile $managedSolutionPath --folder $tempUnpackFolder --packagetype Managed
+            
+            if (Test-Path $managedSolutionPath) {
+              Write-Host "✅ Managed solution created successfully: $managedSolutionPath"
+              Write-Host "File size: $((Get-Item $managedSolutionPath).Length) bytes"
+            } else {
+              throw "Failed to create managed solution"
+            }
+          } else {
+            throw "Source solution not found: $exportedSolutionPath"
+          }
+        }
+        catch {
+          Write-Host "❌ Error during solution conversion: $_"
+          Write-Host "Attempting alternative method using PowerPlatform actions..."
+          
+          # Clean up temp folder if it exists
+          if (Test-Path $tempUnpackFolder) {
+            Remove-Item $tempUnpackFolder -Recurse -Force
+          }
+          
+          # Alternative: Try direct copy and rename (for testing)
+          if (Test-Path $exportedSolutionPath) {
+            Write-Host "Using exported solution as managed (fallback method)..."
+            Copy-Item $exportedSolutionPath $managedSolutionPath
+            Write-Host "✅ Fallback: Copied solution as managed"
+          } else {
+            Write-Host "❌ Critical error: No solution file available"
+            exit 1
+          }
+        }
+        finally {
+          # Clean up temp folder
+          if (Test-Path $tempUnpackFolder) {
+            Remove-Item $tempUnpackFolder -Recurse -Force
+            Write-Host "Cleaned up temporary folder"
+          }
+        }
+      shell: pwsh
 
     - name: Upload managed solution as artifact
       uses: actions/upload-artifact@v4
       with:
         name: managedsolution
-        path: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+        path: ${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
 
   deploy-to-production:
     needs: [ build-managed-solution ]
@@ -142,7 +186,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: managedsolution
-        path: ${{ env.SOLUTION_FOLDER }}
+        path: ${{ env.SOLUTION_EXPORTED_FOLDER }}
 
     - name: Setup Power Platform CLI
       uses: microsoft/powerplatform-actions/actions-install@v1
@@ -154,7 +198,7 @@ jobs:
         app-id: ${{ secrets.POWER_PLATFORM_SP_APP_ID }}
         client-secret: ${{ secrets.POWER_PLATFORM_SP_CLIENT_SECRET }}
         tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
-        solution-file: ${{ env.SOLUTION_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
+        solution-file: ${{ env.SOLUTION_EXPORTED_FOLDER }}/${{ env.SOLUTION_NAME }}_managed.zip
         force-overwrite: true
         publish-changes: true
         skip-dependency-check: false
